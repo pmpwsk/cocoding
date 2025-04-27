@@ -1,0 +1,50 @@
+@page "/login"
+@inject AuthService AuthService
+
+<CoCoTitleH>Anmelden</CoCoTitleH>
+
+<form @onsubmit="Continue">
+    <div class="form-group">
+        <label for="username">Nutzername:</label>
+        <input class="form-control" type="text" id="username" placeholder="Nutzernamen eingeben..." autocomplete="username" @bind-value="@Username">
+    </div>
+    <div class="form-group mt-3">
+        <label for="password">Passwort:</label>
+        <input class="form-control" type="password" id="password" placeholder="Passwort eingeben..." autocomplete="current-password" @bind-value="@Password">
+    </div>
+    @if(ErrorMessage != null) {
+        <p class="text-danger mt-3 mb-0">@ErrorMessage</p>
+    }
+    <button class="btn btn-primary mt-3" type="submit">@ContinueButtonText</button>
+</form>
+
+@code{
+    private string ContinueButtonText = "Anmelden";
+
+    private string? ErrorMessage = null;
+
+    private string Username { get; set; } = "";
+
+    private string Password { get; set; } = "";
+
+    private void Continue()
+    {
+        ErrorMessage = null;
+        ContinueButtonText = "Lädt...";
+        new Thread(() => ContinueTask().GetAwaiter().GetResult()).Start();
+    }
+
+    private async Task ContinueTask()
+    {
+        try
+        {
+            await AuthService.Login(Username, Password, InvokeAsync);
+        }
+        catch (Exception ex)
+        {
+            ContinueButtonText = "Anmelden";
+            ErrorMessage = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+}

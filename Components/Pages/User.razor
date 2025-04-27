@@ -1,0 +1,179 @@
+﻿@page "/user"
+@inject NavigationManager NavigationManager
+@inject AuthService AuthService
+
+@if(ViewedUser != null) {
+    <CoCoTitle>@@@ViewedUser.Username</CoCoTitle>
+
+    @if(ViewedUser.Name == null) {
+        <h1>@@@ViewedUser.Username</h1>
+    } else {
+        <h1>@ViewedUser.Name</h1>
+        <p>@@@ViewedUser.Username</p>
+    }
+    
+    @if (AuthService.IsAdmin && AuthService.User.Id != ViewedUser.Id) {
+        <p>
+            Rolle:
+            <select class="form-select inline-select" @bind="SelectedRoleString">
+                @foreach (Role role in Enum.GetValues(typeof(Role))) {
+                    <option value="@role.ToString()">@role.ToGerman()</option>
+                }
+            </select>
+            <i class="icon icon-check-lg" style="@(RoleVerificationShown ? "visibility: visible; opacity: 1;" : "visibility: hidden; opacity: 0; transition: visibility 0s 1s, opacity 1s linear;")"></i>
+        </p>
+    } else {
+        <p>Rolle: @ViewedUser.Role.ToGerman()</p>
+    }
+    
+    @if (AuthService.User.Id == ViewedUser.Id) {
+        <div>
+            <a class="btn btn-primary" href="/edit-account">Konto bearbeiten</a>
+        </div>
+        
+        <div class="mt-3">
+            <button type="button" class="btn btn-danger" @onclick="OpenDeleteYourselfModal">Konto löschen</button>
+            <Modal @ref="@DeleteYourselfModal" Title="Möchten Sie Ihr Konto löschen?">
+                <p class="danger">Wenn Sie Ihr Konto löschen, werden ihre Einstellungen, Projekte und gesendete Nachrichten ebenfalls gelöscht! Ihr Konto kann nicht wiederhergestellt werden!</p>
+                @if (PossiblyDeletedProjectIds.Count > 0) {
+                    <p class="danger">Folgende Projekte werden gelöscht:
+                        <ul>
+                            @foreach (var projectName in Database.Transaction(cp =>
+                                    PossiblyDeletedProjectIds.Select(projectId => ProjectTable.GetById(cp, projectId)?.Name).ToList())) {
+                                <li>@projectName</li>
+                            }
+                        </ul>
+                    </p>
+                }
+                <button type="button" class="btn btn-danger" @onclick="DeleteYourself">Ja, Konto dauerhaft löschen</button>
+                <button type="button" class="btn btn-primary" @onclick="() => DeleteYourselfModal?.Close()">Nein, Konto behalten</button>
+            </Modal>
+        </div>
+        
+    } else if (AuthService.IsAdmin) {
+        <div class="mb-3">
+            <a class="btn btn-primary" href="/admin/password?id=@ViewedUser.Id">Passwort setzen</a>
+        </div>
+        <div class="mb-3">
+            <!-- changed using DeleteUserModal -->
+            <button class="btn btn-danger" @onclick="OpenDeletionModal">Nutzer löschen</button>
+            <!-- added modal for deletion including modal body -->
+            <Modal @ref="@DeleteUserModal" Title="Möchten Sie den Nutzer löschen?">
+                <p class="danger">Wenn Sie den Nutzer löschen, dann werden alle Einstellungen und Projektzuweisungen dieses Nutzers ebenfalls gelöscht!</p>
+                @if (PossiblyDeletedProjectIds.Count > 0) {
+                    <p class="danger">Folgende Projekte werden gelöscht:
+                        <ul>
+                            @foreach (var projectName in Database.Transaction(cp =>
+                                    PossiblyDeletedProjectIds.Select(projectId => ProjectTable.GetById(cp, projectId)?.Name).ToList())) {
+                                <li>@projectName</li>
+                            }
+                        </ul>
+                    </p>
+                }
+                <button type="button" class="btn btn-danger" @onclick="DeleteUser">Ja, Nutzer dauerhaft löschen</button>
+                <button type="button" class="btn btn-primary" @onclick="() => DeleteUserModal?.Close()">Nein, Nutzer behalten</button>
+            </Modal>
+        </div>
+    }
+} else if(NotFound) {
+    <h1 class="text-danger">Nicht gefunden!</h1>
+}
+
+@code {
+    private UserEntry? ViewedUser = null;
+    
+    private List<int> PossiblyDeletedProjectIds = [];
+
+    private bool NotFound = false;
+
+    /* added for deletion */
+    private Modal? DeleteUserModal;
+    
+    private Modal? DeleteYourselfModal;
+
+    private string SelectedRoleString
+    {
+        get => ViewedUser == null ? "" : ViewedUser.Role.ToString();
+        set
+        {
+            if (ViewedUser == null || (!Enum.TryParse(value, out Role role)) || ViewedUser.Role == role)
+                return;
+
+            if (Database.Transaction(cp =>
+                UserTable.SetRole(cp, ViewedUser.Id, role)))
+            {
+                ViewedUser.Role = role;
+                _ = FlashRoleVerification();
+            }
+        }
+    }
+
+    private bool RoleVerificationShown = false;
+
+    protected override void OnInitialized() {
+        if (NavigationManager.TryGetQuery("id", out var idString) && int.TryParse(idString, out var id))
+            ViewedUser = Database.Transaction(cp => UserTable.GetById(cp, id));
+
+        if (ViewedUser == null)
+            NotFound = true;
+        else SelectedRoleString = ViewedUser.Role.ToString();
+    }
+
+    /* Changed from Delete() to DeleteUser() */
+    private void DeleteUser()
+    {
+        if (ViewedUser == null)
+            return;
+
+        /*if (DeleteButtonText != "Löschen?")
+            DeleteButtonText = "Löschen?";
+        else
+        {*/
+            UserManager.DeleteUser(ViewedUser.Id);
+            NavigationManager.NavigateTo("/admin/users");
+        /*}  Deletebuttonchange removed */
+
+    }
+    
+    private async void DeleteYourself()
+    {
+        if (ViewedUser == null)
+            return;
+        
+        UserManager.DeleteUser(ViewedUser.Id);
+        // I don't know why but the AuthService.Reloaded event does not refresh the TopBarItems.razor even though it is added
+        // in TopBarItems.OnInitialized -> AuthService.Reloaded += OnAuthReloaded
+        await AuthService.Logout();
+        // I also don't know why the NavigationManager.NavigatioTo() method call within AuthService.ApplyLogoutToClient()
+        // does not refresh the TopBarItems.razor even though it is added in TopBarItems.OnInitialized -> NavigationManager.LocationChanged += LocationChanged;
+        // therefore I force by myself the TopBarItems to refresh with the NavigationManager.LocationChanged event another time
+        NavigationManager.NavigateTo(NavigationManager.GetQuery("r")??"/");
+    }
+
+    private void OpenDeletionModal()
+    {
+        if (ViewedUser == null)
+            return;
+        
+        PossiblyDeletedProjectIds = ProjectManager.DeleteForDeletedUser(ViewedUser.Id, true);
+        DeleteUserModal?.Open();
+    }
+    
+    private void OpenDeleteYourselfModal()
+    {
+        if (ViewedUser == null)
+            return;
+        
+        PossiblyDeletedProjectIds = ProjectManager.DeleteForDeletedUser(ViewedUser.Id, true);
+        DeleteYourselfModal?.Open();
+    }
+
+    private async Task FlashRoleVerification()
+    {
+        RoleVerificationShown = true;
+        StateHasChanged();
+        await Task.Delay(3000);
+        RoleVerificationShown = false;
+        StateHasChanged();
+    }
+ }

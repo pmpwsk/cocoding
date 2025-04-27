@@ -1,0 +1,148 @@
+:root {
+    --um-fade-in: 200ms;
+    --um-fade-out: 125ms;
+}
+
+.menu {
+    width: 100%;
+    height: 100dvh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+    z-index: 9000;
+}
+
+.menu.keep-top {
+    height: calc(100dvh - 3.5rem);
+    top: 3.5rem;
+}
+
+.menu.visible {
+    visibility: visible;
+    backdrop-filter: blur(0.3rem);
+    background-color: var(--backdrop-50);
+    transition: backdrop-filter var(--um-fade-in) ease-in, background-color var(--um-fade-in) ease-in, visibility 0ms ease-in 0ms;
+}
+
+.menu.hidden {
+    visibility: hidden;
+    backdrop-filter: blur(0rem);
+    background-color: transparent;
+    transition: backdrop-filter var(--um-fade-out) ease-in, background-color var(--um-fade-out) ease-in, visibility var(--um-fade-out) ease-in;
+}
+
+.menu > div {
+    background: var(--background-colored-60);
+    width: calc(min(100%, 20rem) - 1.4rem);
+    position: absolute;
+    top: 4.2rem;
+    right: 0.7rem;
+    overflow: hidden auto;
+    max-height: calc(100vh - 5.5rem);
+    padding: 0.7rem 0.7rem 0.2rem 0.7rem;
+    border-radius: 0.5rem;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.menu.keep-top > div {
+    top: 0.7rem;
+}
+
+.menu > div::-webkit-scrollbar {
+    display: none;
+}
+
+.menu.visible.right > div {
+    right: 0.7rem;
+    transition: right var(--um-fade-in) ease-in;
+}
+
+.menu.hidden.right > div {
+    right: calc(-5 * min(100%, 20rem));
+    transition: right var(--um-fade-out) ease-in;
+}
+
+.menu.visible.left > div {
+    left: 0.7rem;
+    transition: left var(--um-fade-in) ease-in;
+}
+
+.menu.hidden.left > div {
+    left: calc(-5 * min(100%, 20rem));
+    transition: left var(--um-fade-out) ease-in;
+}
+
+.menu > div p,
+.menu > div div,
+.menu > div input,
+.menu > div a,
+.menu > div button {
+    display: block;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    border-radius: 0.5rem;
+    text-decoration: none;
+    color: var(--text);
+    outline: none;
+    width: 100%;
+    border: none;
+    text-align: left;
+}
+
+.menu > div a,
+.menu > div button {
+    background: var(--background-colored);
+}
+
+.menu > div a:hover,
+.menu > div button:hover {
+    background: var(--background-colored-d0);
+}
+
+.menu > div a.danger,
+.menu > div button.danger {
+    background: #f27979;
+    color: black;
+}
+
+.menu > div a.danger:hover,
+.menu > div button.danger:hover {
+    background: #f27979d0;
+}
+
+.menu > div label {
+    text-shadow: 0 0 2px var(--background-colored-b0);
+}
+
+.menu > div p,
+.menu > div div {
+    background: var(--background-colored-a0);
+}
+
+.menu > div a.info {
+    background: var(--background-colored-a0) !important;
+}
+
+.menu > div input {
+    background: var(--background-medium);
+}
+
+.menu ul > li > a {
+    display: inline;
+    padding: 0;
+    margin: 0;
+    border-radius: 0;
+    text-decoration: none;
+    background: transparent;
+    color: var(--text);
+    outline: none;
+    width: unset;
+    border: none;
+    text-align: left;
+ }
+
+.menu ul > li > a:hover {
+    background: transparent;
+}

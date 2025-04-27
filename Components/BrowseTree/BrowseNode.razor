@@ -1,0 +1,166 @@
+@implements IDisposable
+@inject SharedDataService SharedData
+@inject IJSRuntime JavaScript
+
+<!-- TODO: oncontextmenu doesn't work on iOS Safari because of a bug in WebKit! -->
+
+@if (Data != null) {
+    <!-- Project/folder node element -->
+    <a class="node" href="javascript:" @onclick="Toggle" @oncontextmenu="OpenMenu" @oncontextmenu:preventDefault="true"><span class="icon toggle @(Data.Expanded ? "expanded" : "collapsed")"></span><span class="icon icon-@NodeIcon"></span><span>@Data.Name</span></a>
+    
+    @if (Data.Expanded && Data.Folders != null && Data.Files != null) {
+        <!-- Children -->
+        <div class="node-group">
+            @foreach (var folderData in Data.Folders.OrderBy(f => f.Name)) {
+                <!-- Folder child -->
+                <BrowseNode Data="folderData" />
+            }
+        
+            @foreach (var file in Data.Files.OrderBy(f => f.Name)) {
+                <!-- File node element -->
+                <a class=@FileNodeClass(file) href=@($"/editor?id={file.Id}") @oncontextmenu="() => SharedData.OpenMenu(file)" @oncontextmenu:preventDefault="true"><span class="icon toggle no-background"></span><span class="icon icon-@FileIcon(file)"></span><span>@file.Name</span></a>
+            }
+        </div>
+    }
+}
+
+@code {
+    private IBrowseNodeData? _Data = null;
+#pragma warning disable BL0007
+    /// <summary>
+    /// The data object associated with this node instance.<br/>
+    /// Watches for changes in order to keep the <c>Instance</c> property of the new and old data objects up-to-date. 
+    /// </summary>
+    [Parameter]
+    public IBrowseNodeData? Data
+    {
+        get => _Data;
+        set
+        {
+            if (_Data == value)
+                return;
+
+            // remove reference from old data object
+            if (_Data != null && _Data.Instance == this)
+                _Data.Instance = null;
+            
+            _Data = value;
+
+            // add reference to new data object
+            if (value != null && value.Instance != this)
+                value.Instance = this;
+        }
+    }
+#pragma warning restore BL0007
+
+    /// <summary>
+    /// Method to indicate that the state has changed from other classes and threads.<br/>
+    /// This method is called from the node data objects when file system changes happen.
+    /// </summary>
+    public void CallStateHasChanged()
+        => InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Toggles the node between expanded and collapsed.<br/>
+    /// The set of expanded folders is updated accordingly.
+    /// </summary>
+    private async Task Toggle()
+    {
+        switch (Data)
+        {
+            case ProjectNodeData projectData:
+            {
+                if (SharedData.ExpandedFolderIds.TryGetValue(projectData.Project.Id, out var expandedFolderIds))
+                {
+                    if (Data.Expanded)
+                    {
+                        foreach (var id in projectData.EnumerateExpandedFolderIds())
+                            expandedFolderIds.Remove(id);
+                        Data.Expanded = false;
+                    }
+                    else
+                    {
+                        Data.Expanded = true;
+                    }
+
+                    await JavaScript.SetExpandedFolders(projectData.Project.Id, expandedFolderIds);
+                }
+            } break;
+            case FolderNodeData folderData:
+            {
+                if (SharedData.ExpandedFolderIds.TryGetValue(folderData.Folder.ProjectId, out var expandedFolderIds))
+                {
+                    if (Data.Expanded)
+                    {
+                        foreach (var id in (IEnumerable<int>) [folderData.Folder.Id, ..folderData.EnumerateExpandedFolderIds()])
+                            expandedFolderIds.Remove(id);
+                        Data.Expanded = false;
+                    }
+                    else
+                    {
+                        expandedFolderIds.Add(folderData.Folder.Id);
+                        Data.Expanded = true;
+                    }
+
+                    await JavaScript.SetExpandedFolders(folderData.Folder.ProjectId, expandedFolderIds);
+                }
+            } break;
+        }
+    }
+
+    /// <summary>
+    /// Returns the icon class for this node, depending on the type (project or folder).
+    /// </summary>
+    private string NodeIcon
+        => Data is ProjectNodeData ? "diagram-3" : "folder";
+
+    /// <summary>
+    /// Returns the icon class for a given file node, depending on the file extension.
+    /// </summary>
+    /// <returns></returns>
+    private string FileIcon(FileEntry file)
+    {
+        int dot = file.Name.LastIndexOf('.');
+        return (dot == -1 ? "" : file.Name[(dot+1)..]) switch
+        {
+            "txt" => "filetype-txt",
+            "js" => "filetype-js",
+            "py" => "filetype-py",
+            "html" => "filetype-html",
+            "css" => "filetype-css",
+            _ => "file-earmark"
+        };
+    }
+
+    /// <summary>
+    /// Returns the node class for a given file node, adding "selected" if the file is the currently viewed file (in the editor).
+    /// </summary>
+    private string FileNodeClass(FileEntry file)
+        => "node" + (SharedData.ViewedFile != null && SharedData.ViewedFile.Id == file.Id ? " selected" : "");
+
+    /// <summary>
+    /// Opens the context menu for this node, depending on the type (project or folder).
+    /// </summary>
+    private void OpenMenu()
+    {
+        switch (Data)
+        {
+            case FolderNodeData folderNodeData:
+                SharedData.OpenMenu(folderNodeData);
+                break;
+            case ProjectNodeData projectNodeData:
+                SharedData.OpenMenu(projectNodeData);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Disposes of this component by removing the reference to it from the node data object.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Data != null && Data.Instance == this)
+            Data.Instance = null;
+    }
+
+}

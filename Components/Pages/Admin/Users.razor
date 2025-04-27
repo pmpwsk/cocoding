@@ -1,0 +1,73 @@
+﻿@page "/admin/users"
+@inject AuthService AuthService
+
+@if (AuthService.IsAdmin) {
+    @if (UserList != null) {
+        <CoCoTitleH>Nutzer verwalten</CoCoTitleH>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <input type="text" class="form-control mb-3" placeholder="Filter nach Namen..." @oninput="OnInputChanged" />
+            <div class="d-flex align-items-center sort-margin ml-3 mb-3">
+                <label for="sort-option" class="mb-0 mr-2">Sortierung:</label>
+                <select id="sort-option" class="form-select inline-select" value="@SortOption" @onchange="SortOptionChanged">
+                    <option value="name">Name</option>
+                    <option value="role">Rolle</option>
+                </select>
+            </div>
+        </div>
+
+        @foreach(var user in GetSortedUsers()) {
+            <a href="/user?id=@user.Id" class="list-item d-flex justify-content-between align-items-center">
+                <span>@user.DisplayName</span>
+                @if (user.Role == Role.Administrator) {
+                    <span class="text-bold text-muted" style="font-size: 0.8rem;">Admin</span>
+                }
+            </a>
+        }
+    }
+} else {
+    <h1 class="text-danger">Kein Zugriff!</h1>
+}
+
+@code {
+    private IEnumerable<UserEntry>? UserList = null;
+
+    private string FilterText = string.Empty;
+
+    private string SortOption = "role";
+
+    protected override void OnInitialized()
+    {
+        UserList = Database.Transaction(UserTable.ListAll);
+    }
+
+    /// <summary>
+    /// Makes the text input field being checked at every input change
+    /// </summary>
+    private void OnInputChanged(ChangeEventArgs e)
+    {
+        FilterText = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private void SortOptionChanged(ChangeEventArgs e)
+    {
+        SortOption = (string?)e.Value ?? "role";
+    }
+
+    private IEnumerable<UserEntry> GetSortedUsers()
+    {
+        if (UserList == null)
+            return [];
+
+        var usersAndRoles = UserList.Where(u => u.DisplayName.Contains(FilterText, StringComparison.OrdinalIgnoreCase));
+        return SortOption switch
+        {
+            "role" => usersAndRoles
+                .OrderByDescending(u => u.Role)
+                .ThenBy(u => u.Name),
+            "name" or _ => usersAndRoles
+                .OrderBy(u => u.Name)
+                .ThenByDescending(u => u.Role),
+        };
+    }
+}

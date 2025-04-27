@@ -1,0 +1,32 @@
+:root {
+    --background-plain: #2a2734;
+    
+    --background-colored: #1b1821;
+    --background-colored-60: #1b182160;
+    --background-colored-a0: #1b1821a0;
+    --background-colored-b0: #1b1821b0;
+    --background-colored-d0: #1b1821d0;
+    
+    --background-medium: #23202b;
+
+    --backdrop: #8f80b0;
+    --backdrop-07: #8f80b007;
+    --backdrop-40: #8f80b040;
+    --backdrop-50: #8f80b050;
+    
+    --text: #b0b0c0;
+    --text-lower: #70708a;
+    --text-strong: #e2e2ef;
+    
+    --line: #3e394d;
+    
+    --console-red: #f53228;
+    --console-blue: #00d7d7;
+    --console-violet: #9370db;
+    --console-yellow: #ffeb3b;
+    --console-cocoding: #f2e2d0;
+    
+    --response: #2a2734;
+    
+    --bubble-grey: #505050;
+}

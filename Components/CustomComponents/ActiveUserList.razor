@@ -1,0 +1,19 @@
+﻿@inject AuthService Auth
+
+<ul>
+    @foreach (var user in Users) {
+        <li>
+            <a href="/user?id=@user.Id">
+                @if (user.Id == Auth.User.Id) {
+                    <span class="attribute-label">Sie</span>
+                }
+                <span>@(user.DisplayName)</span>
+            </a>
+        </li>
+    }
+</ul>
+
+@code {
+    [Parameter]
+    public List<UserEntry> Users { get; set; } = [];
+}

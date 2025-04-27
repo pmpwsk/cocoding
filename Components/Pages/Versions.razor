@@ -1,0 +1,476 @@
+@page "/versions"
+@implements IDisposable
+@inject IJSRuntime JavaScript
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+@inject SharedDataService SharedData
+@if (ViewedFile != null) {
+    <CoCoTitle>Versionen: @ViewedFile.Name</CoCoTitle>
+
+    <!-- <summary>
+        Show versions associated with a given file.
+        We pass the following information to the URL to be able to navigate between the different views of this page:
+            id: the id of the viewed file -> always passed to retrieve the available versions
+            ViewedVersion: the id of the version that is currently viewed (for the details view or the preview)
+            Preview=true: passed when the preview is shown
+            ReturnDetails: used with the preview, if true -> return to the details view, else -> return to the overview
+        See also the NAVIGATION METHODS region in the code.
+    -->
+
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/versions.css")>
+
+    @if (Restoring) {
+        <div id="lockOverlay">Version wird wiederhergestellt...</div>
+    }
+    <div id="versionsPage">
+        
+        <!--The navigation line on top. Always shows the return button. If a version is selected (ViewedVersion==null) 
+            also shows the SetVersion and Delete Buttons. The preview button is also enabled, if we are not inside the
+            preview.-->
+        <div class="nav-line">
+            <div style="flex: 99;"></div>
+            @if (ViewedVersion != null) {
+                @if (!Preview) {
+                    <a class="nav-line-item button icon icon-eye vi" @onclick="@(() => NavigateToPreview(ViewedVersion))" title="Voransicht öffnen"></a>
+                }
+
+                <a class="nav-line-item button icon icon-clock-history vi" @onclick="@(() => SetVersion(ViewedVersion))" title="Version wiederherstellen"></a>
+                <a class="nav-line-item button icon icon-trash vi" @onclick="@(() => OpenDeleteModal(ViewedVersion))" title="Version löschen"></a>
+            }
+            <a class="nav-line-item icon icon-box-arrow-in-left vil" @onclick="ViewedVersion == null ? NavigateToEditor : NavigateBack" title=@("Zurück" + (ViewedVersion == null ? " zum Editor" : ""))></a>
+
+        </div>
+        
+        <!--For the rest of the page we have three modes:
+            ViewedVersion==null: Show a table with information about all versions available.
+            ViewedVersion!=null && !Preview: Show details for a version selected (needed when the screen width is reduced
+                                             to show the missing information)
+            ViewedVersion!=null && Preview: We are inside the preview.                                 
+         -->
+        
+        <!-- Header for the the table. The name and the date fields are responsive elements, meaning they are not shown
+             when the width gets too narrow. The placeholders represent the buttons used in the actual table rows.
+             Since the info button serves the purpose of showing the missing information on a narrow screen it is
+             has the "inverted" behaviour of the responsive elements.
+        -->
+        @if (ViewedVersion == null) {
+            <div class="versions-line header">
+                <div class="versions-item header">Label</div>
+                <div class="versions-item header responsive-element">Versionsname</div>
+                <div class="versions-item header">Datum</div>
+                <div class="versions-item header responsive-element">Erstellt von</div>
+                <i class="versions-item button header icon vis first"></i> <!-- Placeholder for the preview button -->
+                <a class="versions-item button header icon vis"></a> <!-- Placeholder for clock button -->
+                <a class="versions-item button header icon vis"></a> <!-- Placeholder for trash button -->
+                <i class="versions-item button header icon vis last"></i> <!-- Placeholder for info button -->
+            </div>
+        }
+        <!--Make rows scrollable except for the preview since the editor itself is scrollable.-->
+        <div class="versions-container @(Preview ? "no-scroll" : "")">
+            @foreach (var version in VersionList.OrderByDescending(x => x.Changed)) {
+                <!--Actual data rows in the table. See description in header above.-->
+                @if (ViewedVersion == null) {
+                    <div class="versions-line">
+                        <div class="versions-item">@(version.Label ?? "<Kein Label>")</div>
+                        <div class="versions-item responsive-element">@(version.Name)</div>
+                        <div class="versions-item">@(AuthService.LocalTimeString(version.Changed))</div>
+                        <div class="versions-item responsive-element">@UserManager.GetPrintableUserName(version.UserId)</div>
+                        <i class="versions-item button icon icon-eye vis first" @onclick="@(() => NavigateToPreview(version))" title="Voransicht öffnen"></i>
+                        <a class="versions-item button icon icon-clock-history vis" @onclick="@(() => SetVersion(version))" title="Version wiederherstellen"></a>
+                        <a class="versions-item button icon icon-trash vis" @onclick="@(()=>OpenDeleteModal(version))" title="Version löschen"></a>
+                        <i class="versions-item button icon icon-info-circle vis last" @onclick="@(() => NavigateToDetails(version))" title="Mehr Informationen anzeigen"></i>
+
+                    </div>
+                }
+                else //ViewedVersion==null
+                    //if !Preview: show information about selected Version (narrow width)
+                    //else: load preview of selected version
+                    switch (Preview) {
+                        //check for the right versionId, ignore other versions
+                        case false when ViewedVersion.VersionId == version.VersionId:
+                            <div class="versions-line alt" style="border-top: 1px solid var(--line);">
+                                <div class="versions-item header">Label</div>
+                            </div>
+                            <div class="versions-line alt">
+                                <div class="versions-item">@(version.Label ?? "<Kein Label>")</div>
+                            </div>
+                            <div class="versions-line alt">
+                                <div class="versions-item header">Versionsname</div>
+                            </div>
+                            <div class="versions-line alt">
+                                <div class="versions-item">@version.Name</div>
+                            </div>
+                            <div class="versions-line alt">
+                                <div class="versions-item header">Erstellungsdatum</div>
+                            </div>
+                            <div class="versions-line alt">
+                                <div class="versions-item">@AuthService.LocalTimeString(version.Changed)</div>
+                            </div>
+                            <div class="versions-line alt">
+                                <div class="versions-item header">Erstellt von</div>
+                            </div>
+                            <div class="versions-line alt"> 
+                                <div class="versions-item">@UserManager.GetPrintableUserName(version.UserId)</div>
+                            </div>
+                            <div class="versions-line alt">
+                                <div class="versions-item header">Kommentar</div>
+                            </div>
+                            <div class="versions-line alt" style="border-bottom: 1px solid var(--line);">
+                                <div class="versions-item">@(version.Comment ?? "<Kein Kommentar>")</div>
+                            </div>
+                            break;
+                        //check for the right versionId, ignore other versions
+                        case true when ViewedVersion.VersionId == version.VersionId:
+                            <div id="previewEditor">
+                                <div id="previewEditorContainer"></div>
+                            </div>
+                            break;
+                    }
+            }
+        </div>
+    </div>
+
+    <!--Warning shown when delete button is pressed.-->
+    <Modal @ref="@DeleteModal" Title=@($"Version löschen: {VersionToProcess?.Name}")>
+        <p class="danger">Version wirklich löschen? Die Version geht unwiderruflich verloren.</p>
+        <button class="btn btn-danger mt-1" @onclick="@(() => DeleteVersion(VersionToProcess))">Löschen</button>
+        <button class="btn btn-primary mt-1" @onclick="@(() => { DeleteModal?.Close(); })">Abbrechen</button>
+    </Modal>
+    
+    <!--Warning shown when someone is still active in the file that is to be restored.-->
+    <Modal @ref="@WarningModal" Title="Datei aktiv in Verwendung!">
+        <p class="danger">Version wirklich wiederherstellen? Änderungen aktiver Nutzer gehen potentiell unwiderruflich verloren.</p>
+        <u>Aktive Nutzer:</u>
+        <div style="padding-bottom: 30px; padding-top: 10px;">
+            <ActiveUserList Users="@ActiveUsers"/>
+        </div>
+        <button class="btn btn-danger mt-1" @onclick="@(() => SetVersion(VersionToProcess, false))">Wiederherstellen</button>
+        <button class="btn btn-primary mt-1" @onclick="@(() => { WarningModal?.Close(); })">Abbrechen</button>
+    </Modal>
+
+    <!--Warning shown if another version of the file is already being restored.-->
+    <Modal @ref="@LockedModal" Title="Datei wird bereits wiederhergestellt">
+        <p>Die Datei wird im Moment von jemand anderem wiederhergestellt. Bitte versuchen Sie es später noch einmal.</p>
+        <button class="btn btn-primary mt-1" @onclick="@(() => { LockedModal?.Close(); })">Okay</button>
+    </Modal>
+
+} else if (NotFound) {
+    <h1 class="text-danger">Nicht gefunden!</h1>
+}
+
+@code {
+
+    /// <summary>
+    /// The file selected (if null -> NotFound==true).
+    /// </summary>
+    private FileEntry? ViewedFile;
+    /// <summary>
+    /// The version currently selected.
+    /// </summary>    
+    private VersionEntry? ViewedVersion;
+    /// <summary>
+    /// Preview flag: true when preview is shown.
+    /// </summary>
+    private bool Preview;
+    /// <summary>
+    /// Version to delete or restore (used for checks).
+    /// </summary>
+    private VersionEntry? VersionToProcess;
+    /// <summary>
+    /// Return-To-Details-Flas: true if preview is accessed from the view showing the details of a specific version (narrow width)
+    /// needed to be able to differentiate between returning to details view and overview of all versions.
+    /// </summary>
+    private bool ReturnToDetails;
+    /// <summary>
+    /// Restoring flag: true if version is being restored -> show lock overlay.
+    /// </summary>
+    private bool Restoring;
+
+    /// <summary>
+    /// File group in EditorHub.
+    /// </summary>
+    private FileGroupData? FileGroup;
+
+    #region WARNING MODALS
+    private Modal? DeleteModal;
+    private Modal? WarningModal;
+    private Modal? LockedModal;
+    #endregion
+
+    /// <summary>
+    /// Not-found-flag: if true, do not show page.
+    /// </summary>
+    private bool NotFound;
+
+    /// <summary>
+    /// List of available versions of the file.
+    /// </summary>
+    private List<VersionEntry> VersionList = [];
+
+    /// <summary>
+    /// Users currently using the file.
+    /// </summary>
+    private List<UserEntry> ActiveUsers = [];
+    
+    #region NAVIGATION MEHODS
+    private void NavigateToEditor()
+    {
+        SharedData.ViewedFile = null;
+        NavigationManager.NavigateTo($"/editor?id={ViewedFile?.Id}");
+    }
+
+    private void NavigateToOverview()
+    {
+        NavigationManager.NavigateTo($"/versions?id={ViewedFile?.Id}");
+    }
+
+    private void NavigateToDetails(VersionEntry versionEntry)
+    {
+        NavigationManager.NavigateTo($"/versions?id={ViewedFile?.Id}&ViewedVersion={versionEntry.VersionId}");
+    }
+
+    private void NavigateToPreview(VersionEntry versionEntry)
+    {
+        var navigateToDetails = ViewedVersion != null;
+        NavigationManager.NavigateTo($"/versions?id={ViewedFile?.Id}&ViewedVersion={versionEntry.VersionId}&Preview=true&ReturnDetails={navigateToDetails}");
+    }
+
+    private void NavigateBack()
+    {
+        if (ReturnToDetails && ViewedVersion != null)
+            NavigateToDetails(ViewedVersion);
+        else
+            NavigateToOverview();
+    }
+    #endregion
+
+    /// <summary>
+    /// Load the page -> retrieve all the parameters passed in the URL and load the versions.
+    /// </summary>
+    private void Load()
+    {
+        //if no file id has been passed show nothing and return
+        if (NavigationManager.TryGetQuery("id", out string? idString) && int.TryParse(idString, out int id))
+            ViewedFile = Database.Transaction(cp => FileTable.GetById(cp, id));
+        else
+        {
+            NotFound = true;
+            return;
+        }
+
+        //if the file id did not return a valid entry show nothing and return
+        if (ViewedFile == null)
+        {
+            NotFound = true;
+            return;
+        }
+        
+        //if the user is not allowed to access the project of the file show nothing and return
+        if (!AuthService.HasRole(ViewedFile.ProjectId, ProjectRole.Participant))
+        {
+            ViewedFile = null;
+            NotFound = true;
+            return;
+        }
+        
+        //load the versions of the file
+        VersionList = Database.Transaction(cp => VersionTable.ListVersions(cp, ViewedFile.Id));
+
+        //register the file to show the name in the top bar
+        SharedData.ViewedFile = ViewedFile;
+        
+        //parse remaining URL parameters
+        if (NavigationManager.TryGetQuery("Preview", out var previewString) && bool.TryParse(previewString, out var preview))
+            Preview = preview;
+        else
+            Preview = false;
+        if (NavigationManager.TryGetQuery("ReturnDetails", out var returnDetailsString) && bool.TryParse(returnDetailsString, out var returnDetails))
+            ReturnToDetails = returnDetails;
+        else 
+            ReturnToDetails = false;
+        if (NavigationManager.TryGetQuery("ViewedVersion", out var versionString) && int.TryParse(versionString, out var versionId))
+            ViewedVersion = Database.Transaction(cp => VersionTable.GetById(cp, versionId));
+        else
+            ViewedVersion = null;
+            
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Open the preview element after rendering the page.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Preview && ViewedVersion != null)
+            await OpenPreview(ViewedVersion);
+       
+        if (firstRender)
+            //make local time adjust properly
+            StateHasChanged();
+    }
+    
+    private void OpenDeleteModal(VersionEntry version)
+    {
+        VersionToProcess = version;
+        DeleteModal?.Open();
+    }
+
+    /// <summary>
+    /// Set all editors registered to the viewed file to the version provided.
+    /// Set version has two phases managed by checkUsage:
+    ///     phase 1: check whether file is used by anyone:
+    ///               -> if true show modal warning the user. If the user decides to proceed anyway,
+    ///                  call SetVersion again with checkUsage=false, and thus proceed to phase 2
+    ///               -> if false proceed to phase 2
+    ///    phase 2: set the version given -> a connection to the EditorHub is created via the Browser, the user enters
+    ///                                      the file and the version given is registered in the hub. All other users
+    ///                                      currently registered in to the file in the hub get a reload message
+    ///                                      effectively loading the version given.
+    /// </summary>
+    private async Task SetVersion(VersionEntry? version, bool checkUsage = true)
+    {
+        //safety check
+        if (ViewedFile == null || version == null)
+            return;
+
+        VersionToProcess ??= version;
+
+        //check whether a version of the file is already being set by someone -> if so, show modal
+        if (EditorHub.Locks.TryGetValue(ViewedFile.Id, out var locked) && locked)
+        {
+            LockedModal?.Open();
+            return;
+        }
+        
+        //check whether file is being used by someone -> if so, show modal
+        if (checkUsage)
+        {
+            EditorHub.FileGroups.TryGetValue(ViewedFile.Id, out var fileGroupToCheck);
+            {
+                if (fileGroupToCheck is { Sessions.Count: > 0 })
+                {
+                    ActiveUsers = FileManager.ListActiveUsers(ViewedFile);
+                    WarningModal?.Open();
+                    return;
+                }
+            }
+        }
+        
+        //close modal in case phase 1 was executed
+        WarningModal?.Close();
+        
+        //create file group if it doesn't exist in the EditorHub
+        if (!EditorHub.FileGroups.TryGetValue(ViewedFile.Id, out FileGroup))
+        {
+            FileGroup = new FileGroupData(ViewedFile);
+            EditorHub.FileGroups[ViewedFile.Id] = FileGroup;
+        }
+        
+        //safety check
+        if (FileGroup == null)
+            return;
+        
+        //show the lock screen
+        Restoring = true;
+        
+        //create a connection to the EditorHub from the clientSide.
+        await JavaScript.InvokeVoidAsync("createConnection");
+        
+        int count = 0;
+        //sometimes the connection is not yet established after the await
+        //we check and wait to be sure
+        while (!await JavaScript.InvokeAsync<bool>("connectionEstablished") && count++ < 10)
+            await Task.Delay(200);
+        //enter the file and set the given version in the EditorHub 
+        bool error = await JavaScript.InvokeAsync<bool>("setVersion", ViewedFile.Id, version.VersionId);
+        await JavaScript.InvokeVoidAsync("disposeConnection");
+        
+        //clean up the EditorHub
+        if (FileGroup.Sessions.Count == 0)
+            EditorHub.FileGroups.Remove(ViewedFile.Id, out _);
+
+        
+        VersionToProcess = null;
+
+        Restoring = false;
+        
+        if (!error)
+            NavigateToEditor();
+    }
+    
+    /// <summary>
+    /// Delete the Version given.
+    /// </summary>
+    private void DeleteVersion(VersionEntry? version)
+    {
+        DeleteModal?.Close();
+        if (version == null)
+            return;
+        
+        Database.Transaction(cp => VersionTable.DeleteVersion(cp, version.VersionId));
+        int index = VersionList.FindIndex(x => x.VersionId == version.VersionId);
+        if (index == -1)
+        {
+            Console.WriteLine("Something went wrong: could not remove version.");
+            return;
+        }
+        VersionList.RemoveAt(index);
+        //we are either in the overview or have to return there now, since we delete the viewed version
+        ViewedVersion = null;
+        Preview = false;
+    }
+
+    /// <summary>
+    /// Open the preview of the version provided.
+    /// </summary>
+    private async Task OpenPreview(VersionEntry version)
+    {
+        Preview = true;
+        ViewedVersion = version;
+        
+        //get the file entry to retrieve the file type and the state of the version to show
+        var versionFileEntry = Database.Transaction(cp => FileTable.GetById(cp, version.FileId));
+
+        //safety check
+        if (versionFileEntry == null)
+            return;
+        
+        var fileType = FileManager.GetFileType(versionFileEntry);
+        var state = FileTable.GetFileState(version.FileId, version.VersionId, true);
+        
+        //if nothing to show, return
+        if (state == null)
+            return;
+
+        int count = 0;
+        
+        //check and wait to let element render properly
+        while (!await JavaScript.InvokeAsync<bool>("elementExists", "previewEditorContainer") && count++ < 10)
+            await Task.Delay(200);
+        
+        //create the preview editor 
+        await JavaScript.InvokeVoidAsync("preview", "previewEditorContainer", fileType.ToString(), AuthService.IsDarkMode);
+
+        //load the version into the editor
+        foreach (var update in state)
+        {
+            await JavaScript.InvokeVoidAsync("applyUpdate", update);
+        }
+    }
+
+    #region MANAGE LOCATION CHANGES
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += LocationChanged;
+        Load();
+    }
+
+    private void LocationChanged(object? sender, LocationChangedEventArgs e)
+        => Load();
+    
+    void IDisposable.Dispose()
+    {
+        NavigationManager.LocationChanged -= LocationChanged;
+    }
+    #endregion
+}

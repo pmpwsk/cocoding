@@ -1,0 +1,246 @@
+@page "/"
+@inject AuthService AuthService
+@inject IJSRuntime JavaScript
+
+@if (ProjectsAndRolesAndUsers != null) {
+    <CoCoTitleH>Dashboard</CoCoTitleH>
+
+    <button class="btn btn-primary mb-3 me-1" @onclick="() => CreateProjectModal?.Open()">Projekt erstellen</button>
+    <a class="btn btn-primary mb-3" href="/scrum-poker">Scrum Poker</a>
+    <div class="mb-3">
+        Sortierung:
+        <select class="form-select inline-select" value="@SortOption" @onchange="SortOptionChanged">
+            <option value="name">Name</option>
+            <option value="time">Zeit</option>
+        </select>
+    </div>
+
+    <Modal @ref="@CreateProjectModal" Title="Neues Projekt erstellen">
+        <form @onsubmit="CreateProject">
+            <div class="form-group mb-3">
+                <label for="new-project-name">Name:</label>
+                <input class="form-control" type="text" id="new-project-name" placeholder="Namen eingeben..." @bind-value="@NewProjectName"/>
+            </div>
+            <div class="form-group mb-3">
+                <label for="new-project-description">Beschreibung:</label>
+                <input class="form-control" type="text" id="new-project-description" placeholder="Beschreibung eingeben..." @bind-value="@NewProjectDescription"/>
+            </div>
+            <div class="form-group mb-3">
+                <label for="new-project-indent">Einrückung (Spaces):</label>
+                <input class="form-control" type="number" id="new-project-indent" placeholder="Einrückung in Spaces angeben..." @bind-value="@NewProjectIndent"/>
+            </div>
+            @if (NewProjectErrorMessage != null) {
+                <p class="text-danger mb-3">@NewProjectErrorMessage</p>
+            }
+            <button class="btn btn-primary" type="submit">Erstellen</button>
+        </form>
+    </Modal>
+
+    @foreach (var parau in GetSortedProjects()) {
+        <div class="list-item project">
+            <div>
+                <div class="name">
+                    <a class="sq icon @(parau.Pinned ? "icon-pin-fill" : "icon-pin-angle") toggle me-2" href="javascript:void(0);" @onclick="() => TogglePin(parau.Project.Id)"></a>
+                    <a href="/browse?pid=@(parau.Project.Id)" class="opener">@parau.Project.Name</a> 
+                </div>
+                <div class="collapse" id="collapse-@parau.Project.Id">
+                    <small>
+                        @if (parau.Project.Description != null) {
+                            <div class="details">
+                                <u>Beschreibung:</u><br/>
+                                @parau.Project.Description
+                            </div>
+                        }
+                        @if (parau.Users.TryGetValue(ProjectRole.Owner, out var owners)) {
+                            <div class="details">
+                                <u>Besitzer: </u>
+                                <ul>
+                                    @foreach (var user in owners) {
+                                        <li><a href="/user?id=@user.Id">@user.DisplayName</a></li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                        @if (parau.Users.TryGetValue(ProjectRole.Manager, out var managers)) {
+                            <div class="details">
+                                <u>Verwalter: </u>
+                                <ul>
+                                    @foreach (var user in managers) {
+                                        <li><a href="/user?id=@user.Id">@user.DisplayName</a></li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                        @if (parau.Users.TryGetValue(ProjectRole.Participant, out var participants)) {
+                            <div class="details">
+                                <u>Teilnehmer: </u>
+                                <ul>
+                                    @foreach (var user in participants) {
+                                        <li><a href="/user?id=@user.Id">@user.DisplayName</a></li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    </small>
+                </div>
+            </div>
+            <a class="sq icon icon-gear" href="/project-settings?id=@parau.Project.Id"></a>
+            <a class="sq icon icon-list-nested" href="/browse-tree?pid=@(parau.Project.Id)"></a>
+            <a class="sq icon toggle" data-bs-toggle="collapse" href="#collapse-@parau.Project.Id" aria-controls="collapse-@parau.Project.Id"></a>            
+        </div>
+    }
+}
+
+@code {
+    private List<ProjectAndRoleAndUsers>? ProjectsAndRolesAndUsers = null;
+
+    private Modal? CreateProjectModal { get; set; }
+
+    private string NewProjectName = "";
+
+    private string NewProjectDescription = "";
+    
+    // we decided to set the initial indent to 4 spaces
+    private int NewProjectIndent = 4;
+
+    private string? NewProjectErrorMessage = null;
+
+    private string SortOption = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        SortOption = await JavaScript.GetCookieAsync("ProjectSortOption") ?? "name";
+        
+        ProjectsAndRolesAndUsers = [];
+        Database.Transaction(cp =>
+        {
+            Dictionary<int, UserEntry> knownUsers = [];
+            foreach (var userAssignment in AssignmentTable.ListByUser(cp, AuthService.User.Id))
+            {
+                var project = ProjectTable.GetById(cp, userAssignment.ProjectId);
+                if (project != null)
+                {
+                    Dictionary<ProjectRole, SortedSet<UserEntry>> users = [];
+                    bool pinned = false;
+                    foreach (var projectAssignment in AssignmentTable.ListByProject(cp, project.Id))
+                    {
+                        if (projectAssignment.Pinned && projectAssignment.UserId == AuthService.User.Id)
+                            pinned = true;
+
+                        if (!knownUsers.TryGetValue(projectAssignment.UserId, out var user))
+                        {
+                            user = UserTable.GetById(cp, projectAssignment.UserId) ?? new(-1, "deleted", "Gelöschter User", Role.User, Theme.System);
+                            knownUsers[projectAssignment.UserId] = user;
+                        }
+
+                        if (users.TryGetValue(projectAssignment.ProjectRole, out var set))
+                            set.Add(user);
+                        else users[projectAssignment.ProjectRole] = [user];
+                    }
+
+                    DateTime timestamp = DateTime.MinValue;
+                    foreach (var file in FileTable.ListByProject(cp, userAssignment.ProjectId))
+                    {
+                        var changed = file.Changed;
+                        if (changed > timestamp)
+                            timestamp = changed;
+                    }
+
+                    ProjectsAndRolesAndUsers.Add(new(project, users, pinned, timestamp));
+                }
+            }
+        });
+    }
+
+    private void TogglePin(int projectId)
+    {
+        if (ProjectsAndRolesAndUsers == null) return;
+        var currentAssignment = ProjectsAndRolesAndUsers
+            .FirstOrDefault(p => p.Project.Id == projectId && p.Pinned);
+
+        bool newPinnedStatus = currentAssignment == null;
+
+        UpdatePinnedStatus(projectId, newPinnedStatus);
+
+        var projectToUpdate = ProjectsAndRolesAndUsers.FirstOrDefault(p => p.Project.Id == projectId);
+        if (projectToUpdate != null)
+        {
+            projectToUpdate.Pinned = newPinnedStatus;
+        }
+    }
+
+
+    private void UpdatePinnedStatus(int projectId, bool newPinnedStatus)
+    {
+        Database.Transaction(cp =>
+        {
+            var userId = AuthService.User.Id;
+            AssignmentTable.SetPinnedStatus(cp, projectId, userId, newPinnedStatus);
+        });
+    }
+
+    private async Task SortOptionChanged(ChangeEventArgs e)
+    {
+        SortOption = (string?)e.Value ?? "name";
+        await JavaScript.SetCookieAsync("ProjectSortOption", SortOption, DateTime.UtcNow.AddDays(30));
+    }
+
+    private IOrderedEnumerable<ProjectAndRoleAndUsers> GetSortedProjects()
+        => ProjectsAndRolesAndUsers == null
+            ? throw new Exception("Projects weren't loaded yet!")
+            : SortOption switch
+            {
+                "time" => ProjectsAndRolesAndUsers
+                    .OrderByDescending(x => x.Pinned)
+                    .ThenByDescending(x => x.Timestamp)
+                    .ThenBy(x => x.Project.Name),
+                "name" or _ => ProjectsAndRolesAndUsers
+                    .OrderByDescending(x => x.Pinned)
+                    .ThenBy(x => x.Project.Name)
+                    .ThenByDescending(x => x.Timestamp)
+            };
+
+    private void CreateProject()
+    {
+        NewProjectErrorMessage = null;
+        try
+        {
+            ProjectEntry newProject = ProjectManager.CreateProject(NewProjectName, NewProjectDescription, NewProjectIndent, AuthService.User.Id);
+            CreateProjectModal?.Close();
+
+            // clear user inputs
+            NewProjectName = "";
+            NewProjectDescription = "";
+
+            // set pinned status
+            bool pinned = false;
+
+            // update project list
+            ProjectsAndRolesAndUsers?.Add(new 
+            (
+                newProject,
+                new Dictionary<ProjectRole, SortedSet<UserEntry>>()
+                {
+                    [ProjectRole.Owner] = [ AuthService.User ]
+                },
+                pinned,
+                DateTime.MinValue
+            ));
+        }
+        catch (Exception ex)
+        {
+            NewProjectErrorMessage = ex.Message;
+        }
+    }
+
+    private class ProjectAndRoleAndUsers(ProjectEntry project, Dictionary<ProjectRole, SortedSet<UserEntry>> users, bool pinned, DateTime timestamp)
+    {
+        public ProjectEntry Project = project;
+
+        public Dictionary<ProjectRole, SortedSet<UserEntry>> Users = users;
+
+        public bool Pinned = pinned;
+
+        public DateTime Timestamp = timestamp;
+    }
+}

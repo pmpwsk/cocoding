@@ -1,0 +1,41 @@
+{
+    "name": "cocoding",
+    "short_name": "cocoding",
+    "start_url": "/",
+    "display": "minimal-ui",
+    "background_color": "#000000",
+    "theme_color": "#23202b",
+    "orientation": "any",
+    "icons": [
+      {
+        "src": "/cocoding_icon.ico",
+        "type": "image/x-icon",
+        "sizes": "16x16 24x24 32x32 48x48 64x64 72x72 96x96 128x128 256x256"
+      },
+      {
+        "src": "/cocoding_icon.svg",
+        "type": "image/svg+xml",
+        "sizes": "any"
+      },
+      {
+        "src": "/cocoding_icon.png",
+        "type": "image/png",
+        "sizes": "512x512"
+      }
+    ],
+    "launch_handler": {
+      "client_mode": "navigate-new"
+    },
+    "related_applications": [
+      {
+        "platform": "webapp",
+        "url": "/manifest.json"
+      }
+    ],
+    "offline_enabled": false,
+    "omnibox": {
+      "keyword": "cocoding"
+    },
+    "version": "1.0.0"
+  }
+  

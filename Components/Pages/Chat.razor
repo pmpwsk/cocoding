@@ -1,0 +1,1004 @@
+@inject NavigationManager NavigationManager
+@inject AuthService AuthService
+@inject SharedDataService SharedData
+@inject IJSRuntime JavaScript
+
+@using System.Net.Mime
+@implements IDisposable
+
+@if (ProjectId == null) {
+    <div class="d-flex flex-column align-items-center">
+        <div class="row">
+            <div class="spinner-border" role="status">
+                <span class="sr-only"></span>
+            </div>
+        </div>
+        <div class="row">
+            <strong>Chat wird geladen...</strong>
+        </div>
+    </div>
+}
+else { 
+    <div class="message-list"
+         id="message-list">
+        @if (!AllMessagesLoaded) {
+            <button class="btn btn-primary ibtn mb-2" id="load-older-messages" style="width: fit-content; display: block; text-align: center" @onclick="LoadOlderMessages">
+                <span class="icon icon-arrow-clockwise"></span>
+                <span>Ältere Nachrichten laden</span>
+            </button>
+        }
+        <div class="messages">
+            @foreach (var message in Messages) {
+                <div class="@(message.UserId == AuthService.User.Id ? "sent" : "received") @(MessageToEdit?.Id == message.Id ? "edit-accent" : "" )"
+                     style="--bubble-color: @UserColor(message);"
+                     id="message-@message.Id">
+                    <!-- RESPONSE TO -->
+                    @if (message.ResponseTo != null && !(MessageToEdit == message && (ResponseToChanged || DeleteResponseToAfterEdit))) {
+                        <div class="response-container">
+                            @if (ResponsesDict.TryGetValue(message.Id, out var m) && m != null) {
+                                <div class="response" @onclick="() => ScrollToMessage(message.ResponseTo)">
+                                    <div>
+                                        <span class="icon icon-box-arrow-in-up-left icon-in-message" title="Zur Nachricht"></span> @AuthService.LocalTimeString(m.Timestamp)
+                                    </div>
+                                    <div>@GetUserName(m)</div>
+                                    <div>@TruncateResponse(m.Text)</div>
+                                </div>
+                            }
+                            else {
+                                <div class="response">Nachricht gelöscht</div>
+                            }
+                            <div class="icon icon-close response chat-close response"
+                                 style="display: @(MessageToEdit == message ? "block" : "none")"
+                                 title="Antwort auf löschen"
+                                    @onclick="@(() => DeleteResponseToAfterEdit = true)">
+                            </div>
+                        </div>
+                        }
+                    <!-- RESPONSE TO -->
+                    <div style="display: inline-flex; width: 100%">
+                        <div class="date">@AuthService.LocalTimeString(message.Timestamp)</div>
+                        <span style="flex-grow: 1"></span>
+                        <div class="icon icon-reply message-icon" title="Antworten" @onclick="@(() => RespondTo(message))"></div>
+                        @if (message.UserId == AuthService.User.Id) {
+                            if (MessageToEdit == null) {
+                                <div class="icon icon-pen message-icon" title="Nachricht bearbeiten" @onclick="@(() => EditMessage(message))"></div>
+                            }
+                            <div class="icon icon-trash message-icon" style="width: 0.8rem; height: 0.8rem;" title="Nachricht löschen" @onclick="@(() => OpenDeletionModal(message))"></div>
+                        }
+                    </div>
+                    <div class="user">@GetUserName(message)</div>
+                    
+                    <!-- SELECTION -->
+                    @if (message.SelectionId != null && !(MessageToEdit == message && (SelectionChanged || DeleteSelectionAfterEdit))) {
+                        <div class="selection-container">
+                            @if (SelectionDict.ContainsKey(message.Id) && SelectionDict[message.Id] != null) {
+                                <div class="selection quotes left">&#x275D</div>
+                                <div class="selection" @onclick="@(() => RestoreSelection(SelectionDict[message.Id]!))">
+                                    @(GetFileName(message) + "\n" + GetTruncatedText(GetTextSnippet(message), SelectionLines))
+                                </div>
+                                <div class="selection quotes right container">
+                                    <div class="icon icon-close chat-close quotes" style="display: @(MessageToEdit == message ? "block" : "none")" @onclick="@(() => DeleteSelectionAfterEdit = !DeleteSelectionAfterEdit)" title="Markierung löschen"></div>
+                                    <div class="quotes right" style="@(MessageToEdit == message ? "padding-top: 0;" : "")">&#x275E</div>
+                                </div>
+                            }
+                            else {
+                                <div class="selection quotes left" style="cursor: auto"></div>
+                                <div class="selection" style="cursor: auto">
+                                    @(SelectionDict.ContainsKey(message.Id) ? "<Datei gelöscht>" : "Lade...")
+                                </div>
+                                <div class="selection quotes right container" style="cursor: auto">
+                                    <div class="icon icon-close chat-close quotes" style="display: @(MessageToEdit != null ? "block" : "none")" @onclick="@(() => DeleteSelectionAfterEdit = !DeleteSelectionAfterEdit)" title="Markierung löschen"></div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    <!-- /SELECTION -->
+                    <div class="message">@(MessageToEdit?.Id != message.Id ? message.Text : "...")</div>
+                </div>
+            }
+        </div>
+    </div>
+    <div class="list-group mb-2" id="user-suggestion-list">
+        @if (ShowUserSuggestions) {
+            @foreach (var user in FilteredUsers) {
+                <a class="list-group-item list-group-item-action"
+                   style="cursor: pointer; 
+                          background: var(--background-plain); 
+                          border: 1px solid var(--line);"
+                   @onclick="() => SelectUser(user.User.Username)">
+                    @user.User.Username
+                </a>
+            }
+        }
+    </div>
+    <div class="chat-footer">
+        <div class="@(MessageToEdit != null ? "edit-accent" : "")">
+            @if (MessageToEdit != null)
+            {
+                <div style="display: inline-flex; width: 100%; margin-bottom: 5px; padding: 0.25rem">
+                    <div style="font-size: 0.8rem; color: var(--text-lower); font-style: italic">Nachricht bearbeiten</div>
+                    <span style="flex-grow: 1"></span>
+                    <div class="icon icon-close chat-close" title="Bearbeiten abbrechen" @onclick="@(() => EditMessage())"></div>
+                </div>
+            }
+            @if (MessageToRespondTo != null && MessageToRespondTo.Id != MessageToEdit?.ResponseTo) {
+            <div class="response-container-footer">
+                <div style="display: inline-flex;  width: 100%;">
+                    <div style="font-weight: bold">Antwort auf</div>
+                    <span style="flex-grow: 1"></span>
+                    <div class="icon icon-close chat-close response" title="Antworten abbrechen" @onclick="@(() => RespondTo(null))"></div>
+                </div>
+                <div>@GetUserName(MessageToRespondTo) (@AuthService.LocalTimeString(MessageToRespondTo.Timestamp))</div>
+                <div>@MessageToRespondTo.Text</div>
+            </div>    
+            }
+            <textarea 
+                 class="input"
+                 id="new-message"
+                 placeholder="Bitte Nachricht eingeben"
+                 maxlength="200"
+                 @bind="@NewMessage"
+                 @oninput="HandleCombinedInput"
+                 @onkeydown="HandleKeyDown">
+            </textarea>
+        </div>
+        <div style="display: inline-flex; width: 100%">
+            <p class="character-limit">Zeichenlimit: @MessageLength / 200</p>
+            @if (Selection.Length == 0)
+            {
+                <div class="icon chat-square-quote selectionButton" title="Im Editor ausgewählten Text zitieren"
+                     @onclick="SetSelection"></div>
+            }
+            else
+            {
+                <div class="icon chat-square-quote-fill selectionButton" style="background: @SelectionHighlightColor"
+                     @onclick="SetSelection"></div>
+            }
+        </div>
+        <button class="btn btn-primary ibtn mb-2 @(MessageToEdit != null ? "edit-accent" : "")" id="send-message-button" style="width: 100%; justify-content: center" @onclick="SendMessage">
+            <span class="icon icon-send"></span>
+            <span>Senden</span>
+        </button>
+    </div>
+    <Modal @ref="@MessageDeletionModal" Title="Nachricht löschen" OnClose="(() => MessageToDelete = null)">
+        <p class="danger">Wirklich löschen? Die Nachricht @(MessageToDelete?.SelectionId==null ? " geht" : "und die Markierung gehen") unwiderruflich verloren!</p>
+        <button class="btn btn-primary mt-1" @onclick="() => OpenDeletionModal(null, true)">Abbrechen</button>
+        <button class="btn btn-danger mt-1 me-2" @onclick="@(() => DeleteMessage(MessageToDelete))">Ja, Nachricht dauerhaft löschen</button>
+    </Modal>
+}
+
+@code {
+    
+    // maximum number of lines being shown in a selection
+    private static readonly int SelectionLines = 5;
+
+    // color that is used when marking a selection in the text editor
+    private string SelectionHighlightColor => AuthService.IsDarkMode ? "#aea3d9" : "#CAD0D0";
+    
+    // list of all chat messages
+    private SortedSet<MessageEntry> Messages = [];
+    
+    // flag to indicate if all messages loaded
+    private bool AllMessagesLoaded = false;
+    
+    // id of the project where the chat belongs to
+    private int? ProjectId = null;
+    
+    // new message input
+    private string NewMessage = "";
+    
+    // modal for message deletion
+    private Modal? MessageDeletionModal = null;
+
+    // message that ought to be deleted
+    private MessageEntry? MessageToDelete = null;
+    
+    // message that is currently edited
+    private MessageEntry? MessageToEdit = null;
+    
+    // store text of textarea before editing
+    private string TextBeforeEditing = "";
+
+    // the selection being included in the message
+    private double[] Selection = [];
+
+    // the response to being included in the message
+    // !!!DO NOT SET THIS DIRECTLY BUT USE THE METHOD RespondTo() INSTEAD!!!
+    private MessageEntry? MessageToRespondTo = null;
+    
+    // keeps track of changed selections while editing
+    private bool SelectionChanged = false;
+    
+    // keeps track of whether selection should be deleted after editing
+    private bool DeleteSelectionAfterEdit = false;
+
+    // keeps track of changed response to while editing
+    private bool ResponseToChanged = false;
+    
+    // keeps track of whether response o should be deleted after editing
+    private bool DeleteResponseToAfterEdit = false;
+    
+    // keeps track of the selection before editing
+    private double[] SelectionBeforeEditing = [];
+    
+    // keeps track of the response to before editing
+    private MessageEntry? ResponseToBeforeEditing = null;
+    
+    // entered characters
+    // I needed to declare it with getter and setter because otherwise the value was not updated properly.
+    private int MessageLength { get; set; }
+    
+    // flag to show suggestions
+    private bool ShowUserSuggestions = false;
+    
+    // filtered user list for suggestions
+    private List<UserAndStatus> FilteredUsers = [];
+
+    [Parameter]
+    public List<UserAndStatus> ProjectUsers { get; set; } = [];
+    
+    // dictionary holding responses of the current chat, response (message) == null signifies the message has been deleted
+    // structure: <messageId, response text, username>
+    private Dictionary<int, MessageEntry?> ResponsesDict = new ();
+
+    // dictionary holding selections of the current project, selection == null signifies file has been deleted
+    // structure: <messageId, selection>
+    private Dictionary<int, SelectionEntry?> SelectionDict = new ();
+    // dictionary holding the corresponding text snippets being grouped by files (makes it easier to remove selections when a file is deleted)
+    // structure: <fileId, <selectionId, textSnippet>>
+    private Dictionary<int, Dictionary<int, string?>> TextSnippetDict = new ();
+    // dictionary holding the file names
+    // structure: <fileId, fileName>
+    private Dictionary<int, string> FileNameDict = new ();
+
+    public enum ReceiveMode {
+        Post,
+        Update,
+        Delete
+    }
+    
+    protected override void OnInitialized()
+    {
+        // bind events
+        SharedData.Changed += LoadProject;
+        MessageManager.MessageSent += ReceiveMessage;
+        NavigationManager.LocationChanged += HandleLocationChanged;
+
+        FileManager.Events.FileMetadataChanged += UpdateFileName;
+        FileManager.Events.FileDeleted += UpdateFileDeleted;
+
+        // load chat messages
+        LoadProject();
+    }
+    
+    /// <summary>
+    /// Receives messages sent by other users. If the delete flag is set, deletes the message from the chat instead.
+    /// If a message is passed that has a duplicate message ID the old message is updated.
+    /// </summary>
+    private void ReceiveMessage(MessageEntry message, ReceiveMode mode)
+    {
+        if (message.ProjectId != ProjectId) 
+            return;
+        // handle delete case
+        if (mode == ReceiveMode.Delete)
+        {
+            Messages.Remove(message);
+            
+            // remove response from dict when message is key
+            // and when message is value
+            RemoveResponse(message);
+            
+            RemoveSelection(message);
+            InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        }
+        if (mode == ReceiveMode.Post)
+        {
+            Messages.Add(message);
+            InvokeAsync(() => LoadResponse(message));//don't invoke StateHasChanged and scroll down because it is handled by LoadSelection
+            InvokeAsync(() => LoadSelection(message, true, true));
+        }
+        
+        // check if message with same id already exists -> if so update it, insert new message otherwise
+        var duplicateMessage = Messages.FirstOrDefault(m => m.Id == message.Id);
+        if (mode == ReceiveMode.Update && duplicateMessage != null)
+        {
+            duplicateMessage.Text = message.Text;
+            duplicateMessage.ResponseTo = message.ResponseTo;
+            InvokeAsync(() => LoadResponse(message));//don't invoke StateHasChanged because it is handled by LoadSelection
+            duplicateMessage.SelectionId = message.SelectionId;
+
+            // update entry in ResponsesDict
+            foreach (var response in ResponsesDict.Where(response => response.Value?.Id == message.Id))
+            {
+                if (response.Value == null)
+                    continue;
+                response.Value.Text = message.Text;
+                response.Value.ResponseTo = message.ResponseTo;
+                response.Value.SelectionId = message.SelectionId;
+            }
+            
+            RemoveSelection(message);
+            InvokeAsync(() => LoadSelection(message, true));
+        }
+    }
+    
+    /// <summary>
+    /// Sends message.
+    /// </summary>
+    private async Task SendMessage()
+    {
+        NewMessage = NewMessage.Trim();
+        if (ProjectId != null && NewMessage != "")
+        {
+            SelectionEntry? selection = null; 
+            if (Selection.Length != 0 && SharedData.ViewedFile != null) {
+                // Save the selection to the database
+                selection = Database.Transaction(cp => SelectionTable.CreateSelection(cp, SharedData.ViewedFile.Id, Selection[0], Selection[1], Selection[2], Selection[3]));
+                // add selection to the file group in the EditorHub
+                // NEEDS TO BE DONE HERE SINCE THE SELECTION NEED TO BE LOADED INTO THE EDITORHUB BEFORE THE CHAT IS LOADED
+                EditorHub.AddSelectionToFileGroup(SharedData.ViewedFile.Id, selection);
+                await SetSelection();
+                
+                // if editing update database
+                if (MessageToEdit != null)
+                {
+                    Database.Transaction(cp => MessageManager.UpdateSelection(cp, MessageToEdit, selection.SelectionId));
+                    SelectionDict.TryGetValue(MessageToEdit.Id, out var selectionToDelete);
+                    if (selectionToDelete != null)
+                        EditorHub.RemoveSelectionFromFileGroup(selectionToDelete);
+                    MessageToEdit.SelectionId = selection.SelectionId;
+                }
+            }
+            else
+            {
+                // if we edited and the delete selection after edit flag is set, delete selection
+                if (MessageToEdit != null && DeleteSelectionAfterEdit && MessageToEdit.SelectionId != null)
+                {
+                    Database.Transaction(cp => {
+                        MessageManager.UpdateSelection(cp, MessageToEdit, null);
+                    });
+                    SelectionDict.TryGetValue(MessageToEdit.Id, out var selectionToDelete);
+                    if (selectionToDelete != null)
+                        EditorHub.RemoveSelectionFromFileGroup(selectionToDelete);
+                    MessageToEdit.SelectionId = null;
+                }
+            }
+
+            // if editing update database
+            if (MessageToEdit != null)
+            {
+                if (MessageToEdit.Text != NewMessage)
+                {
+                    Database.Transaction(cp => MessageTable.UpdateText(cp, MessageToEdit.Id, NewMessage));
+                    MessageToEdit.Text = NewMessage;
+                }
+                if (ResponseToChanged || DeleteResponseToAfterEdit)
+                {
+                    Database.Transaction(cp => MessageTable.UpdateResponseTo(cp, MessageToEdit.Id, MessageToRespondTo?.Id));
+                    MessageToEdit.ResponseTo = MessageToRespondTo?.Id;
+                }
+            }
+            // if not editing create new message in database otherwise pass edited message
+            var newMessage = MessageToEdit ?? Database.Transaction(cp =>
+            MessageTable.CreateMessage(cp, ProjectId.Value, AuthService.User.Id, NewMessage, DateTime.UtcNow, selection?.SelectionId, MessageToRespondTo?.Id));
+
+            MessageManager.ReportMessageSent(newMessage, MessageToEdit == null ? ReceiveMode.Post : ReceiveMode.Update);
+            NewMessage = "";
+            MessageLength = 0;
+            MessageToRespondTo = null;
+            if (MessageToEdit != null)
+                await RestoreStateBeforeEditing();
+
+            // scroll to bottom after sending a new message
+            await JavaScript.InvokeVoidAsync("scrollToBottomInChat");
+        }
+    }
+
+    /// <summary>
+    /// Deletes the message passed and the associated selection from all data structures.
+    /// </summary>
+    private async Task DeleteMessage(MessageEntry? message)
+    {
+        MessageDeletionModal?.Close();
+        
+        if (message == null)
+            return;
+        
+        Database.Transaction(cp => MessageManager.DeleteMessage(cp, message));
+        
+        MessageManager.ReportMessageSent(message, ReceiveMode.Delete);
+
+        if (MessageToEdit != null && MessageToEdit.Id == message.Id)
+            await RestoreStateBeforeEditing();
+
+    }
+
+    private void OpenDeletionModal(MessageEntry? message = null, bool close = false)
+    {
+        if (message == null)
+        {
+            if (close)
+            {
+                MessageDeletionModal?.Close();
+                MessageToDelete = null;
+            }
+            return;
+        }
+        
+        MessageToDelete = message;
+        MessageDeletionModal?.Open();
+
+    }
+    
+    /// <summary>
+    /// Puts chat into editing mode, if valid message is passed. Abort editing if null is passed.
+    /// </summary>
+    private async Task EditMessage(MessageEntry? message = null)
+    {
+        MessageToEdit = message;
+        
+        // handle message being passed for editing
+        if (message != null)
+        {
+            if (!Messages.Contains(message))
+                return;
+            
+            // safe text before editing
+            TextBeforeEditing = NewMessage;
+            
+            //set up the text area
+            NewMessage = message.Text;
+            MessageLength = NewMessage.Length;
+            
+            // if a selection exists store it and undo it for the time of editing
+            if (Selection.Length != 0)
+            {
+                SelectionBeforeEditing = Selection;
+                await SetSelection();
+                Selection = [];
+            }
+            
+            // if a response to exists store it and undo it for the time of editing
+            ResponseToBeforeEditing = MessageToRespondTo;
+            MessageToRespondTo = null;
+            
+            InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        }
+        else
+            await RestoreStateBeforeEditing();
+    }
+    /// <summary>
+    /// Restores the chat to the state before editing.
+    /// </summary>
+    private async Task RestoreStateBeforeEditing()
+    {
+
+        // reset text area
+        NewMessage = TextBeforeEditing;
+        MessageLength = NewMessage.Length;
+        TextBeforeEditing = "";
+        
+        // remove selection and highlight in text if set
+        if (Selection.Length != 0)
+            await SetSelection();
+        
+        // restore the selection if one was set before editing
+        if (SelectionBeforeEditing.Length != 0)
+        {
+            Selection = SelectionBeforeEditing;
+            await JavaScript.InvokeVoidAsync("addHighlight", Selection, SelectionHighlightColor);
+        }
+        
+        // restore response to
+        MessageToRespondTo = ResponseToBeforeEditing;
+        
+        // reset flags and trackers
+        SelectionBeforeEditing = [];
+        SelectionChanged = false;
+        DeleteSelectionAfterEdit = false;
+        ResponseToBeforeEditing = null;
+        ResponseToChanged = false;
+        DeleteResponseToAfterEdit = false;
+        MessageToEdit = null;
+        InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+    }
+    /// <summary>
+    /// Loads the next five older messages from the database.
+    /// </summary>
+    private void LoadOlderMessages()
+    {
+        if (ProjectId == null)
+            return;
+
+        var olderThan = Messages.Count > 0 ? Messages.Min(m => m.Timestamp) : DateTime.UtcNow;
+        
+        var olderMessages = Database.Transaction(cp => MessageTable.ListOlderMessages(cp, ProjectId.Value, olderThan));
+        AllMessagesLoaded = olderMessages.Count < 5;
+        foreach (var message in olderMessages)
+        {
+            Messages.Add(message);
+            InvokeAsync(() => LoadResponse(message, true));
+            InvokeAsync(() => LoadSelection(message, true));
+        }
+    }
+    
+    /// <summary>
+    /// Loads the root node of the file tree using the viewed file's project ID.
+    /// </summary>
+    private void LoadProject()
+    {
+        if (SharedData.ViewedFile != null && ProjectId != SharedData.ViewedFile.ProjectId)
+        {
+            ProjectId = SharedData.ViewedFile.ProjectId;
+            Messages = new(Database.Transaction(cp => 
+                MessageTable.ListLastFiveMessagesByProject(cp, ProjectId.Value)));
+            
+            InvokeAsync(LoadAllResponses);
+            InvokeAsync(LoadAllSelections);
+            InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        }
+    }
+    
+    /// <summary>
+    /// Saves the passed messages ID in MessageToRespondTo -> used in SendMessage to give to created Message. If null is passed
+    /// the message will not be a response.
+    /// </summary>
+    private void RespondTo(MessageEntry? messageToRespondTo)
+    {
+        MessageToRespondTo = messageToRespondTo;
+
+        if (MessageToEdit == null)
+            return;
+        if (messageToRespondTo == null)
+            ResponseToChanged = false;
+        else if (MessageToEdit.ResponseTo != messageToRespondTo.Id)
+            ResponseToChanged = true;
+        else
+            ResponseToChanged = false;
+    }
+    
+    /// <summary>
+    /// Load all responses from messages in Messages
+    /// </summary>
+    private async Task LoadAllResponses()
+    {
+        // Here the responses are loaded into the dictionary ResponsesDict.
+        foreach (var message in Messages)
+            await LoadResponse(message);
+        
+        InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        await JavaScript.InvokeVoidAsync("scrollToBottomInChat");
+    }
+    
+    /// <summary>
+    /// Load response provided by message.ResponseTo or do nothing if it is null.
+    /// Calls StateHasChanged if invokeStatHasChanged == true and  scrolls down if scrollDown == true.
+    /// </summary>
+    private async Task LoadResponse(MessageEntry message, bool invokeStateHasChanged = false, bool scrollDown = false)
+    {
+        if (message.ResponseTo == null)
+            goto End;
+
+        // add response text to dict when it is already as a message in the list Messages
+        // on this way we can save us the call to the database
+        var messageInDict = Messages.FirstOrDefault(x => x.Id == message.ResponseTo);
+        if (messageInDict != null)
+            ResponsesDict[message.Id] = messageInDict;
+        
+        if (!ResponsesDict.ContainsKey(message.Id) || ResponsesDict[message.Id]?.ResponseTo != message.ResponseTo)
+            ResponsesDict[message.Id] = Database.Transaction(cp => MessageTable.GetById(cp, (int)message.ResponseTo));
+
+        End:
+        if (invokeStateHasChanged)
+            InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        if (scrollDown)
+            await JavaScript.InvokeVoidAsync("scrollToBottomInChat");
+    }
+    
+    /// <summary>
+    /// Removes the response as a value and as a key from the dictionary
+    /// </summary>
+    private void RemoveResponse(MessageEntry message)
+    {
+        ResponsesDict.Remove(message.Id);
+        var messagesWithDeletedResponse = ResponsesDict
+            .Where(x => x.Value?.ResponseTo == message.ResponseTo);
+
+        foreach (var mes in messagesWithDeletedResponse)
+        {
+            ResponsesDict[mes.Key] = null;
+        }
+    }
+    
+    /// <summary>
+    /// Truncates the response.
+    /// </summary>
+    private string TruncateResponse(string response, int maxLength = 20)
+    {
+        return response.Length > maxLength ? response.Substring(0, maxLength) + "..." : response;
+    }
+
+    ///<summary>
+    /// Set/Unset the currently selected text as selection. 
+    /// </summary>
+    private async Task SetSelection()
+    {
+        if (SharedData.ViewedFile == null) // Ensure a file is being viewed
+            return;
+        if (Selection.Length == 0)
+        {
+            // Invoke JavaScript to get the current selection
+            Selection = await JavaScript.InvokeAsync<double[]>("getSelection");
+            
+            if(Selection.Length != 0)
+                await JavaScript.InvokeVoidAsync("addHighlight", Selection, SelectionHighlightColor);
+
+            if (MessageToEdit != null)
+                SelectionChanged = true;
+
+        }
+        else
+        {
+            await JavaScript.InvokeVoidAsync("removeHighlight", Selection);
+            Selection = []; 
+            SelectionChanged = false;
+        }
+
+    }
+    
+    /// <summary>
+    /// Removes the selection associated with the message from all datastructures. 
+    /// </summary>
+    private void RemoveSelection(MessageEntry message)
+    {
+        if (!SelectionDict.Remove(message.Id, out var selection))
+            return;
+
+        if (selection == null)
+            return;
+
+        
+        if (!TextSnippetDict.TryGetValue(selection.FileId, out var textSnippets))
+           return;
+        
+        // if it is in the list of text snippets for the associated file, remove it from list
+        if (!textSnippets.ContainsKey(selection.SelectionId))
+            return;
+        textSnippets.Remove(selection.SelectionId);
+
+        // if it was the last item in the list remove the list altogether and also remove the file name
+        if (textSnippets.Count != 0)
+            return;
+        TextSnippetDict.Remove(selection.FileId);
+        FileNameDict.Remove(selection.FileId);
+    }
+    
+    /// <summary>
+    /// Method to set the selected text
+    /// </summary>
+    private async Task RestoreSelection(SelectionEntry selection, bool useUpToDate = true)
+    {
+        // get the latest SelectionEntry in case it changed -> we don't care about performance here because this method
+        // won't be invoked too often -> still can be turned off via useUpToDate
+        var selectionToProcess = useUpToDate ? Database.Transaction(cp => SelectionTable.GetById(cp, selection.SelectionId)) : selection;
+        
+        if (selectionToProcess == null)
+            return;
+        
+        // Check if the file has changed
+        if (SharedData.ViewedFile?.Id != selectionToProcess.FileId)
+        {
+            // Navigate to the new file
+            NavigationManager.NavigateTo("/editor?id=" + selectionToProcess.FileId);
+
+            int count = 0;
+            // Ensure the connection is established
+            while (!await JavaScript.InvokeAsync<bool>("connectionEstablished") && count++ < 10)
+                await Task.Delay(200); 
+
+            count = 0;
+            // Ensure the editor is enabled
+            while (!await JavaScript.InvokeAsync<bool>("checkYdocLoaded") && count++ < 10)
+                await Task.Delay(200); 
+        }
+
+        // Restore the text selection using JavaScript
+        await JavaScript.InvokeVoidAsync("restoreSelection", selectionToProcess.ClientStart, selectionToProcess.ClockStart, selectionToProcess.ClientEnd, selectionToProcess.ClockEnd);
+    }
+    /// <summary>
+    /// Load all selection from messages in Messages
+    /// </summary>
+    private async Task LoadAllSelections()
+    {
+        //Here the selections are loaded into the dictionary.
+        foreach (var message in Messages)
+            await LoadSelection(message);
+        
+        InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        await JavaScript.InvokeVoidAsync("scrollToBottomInChat");
+    }
+
+    /// <summary>
+    /// Load selection provided by message.SelectionId or do nothing if it is null.
+    /// Loads ALL relevant data (including file name, text snippets and updates) for displaying selections,
+    /// calls StateHasChanged if invokeStatHasChanged == true and  scrolls down if scrollDown == true.
+    /// </summary>
+    private async Task LoadSelection(MessageEntry message, bool invokeStateHasChanged = false, bool scrollDown = false)
+    {
+        if (message.SelectionId == null)
+            goto End;
+
+        if (!SelectionDict.ContainsKey(message.Id) || SelectionDict[message.Id]?.SelectionId != message.SelectionId)
+            SelectionDict[message.Id] = Database.Transaction(cp => SelectionTable.GetById(cp, (int)message.SelectionId));
+
+        //create local variable
+        var selection = SelectionDict[message.Id];
+
+        // only true if file has been deleted -> we don't need to continue
+        if (selection == null)
+            goto End;
+
+        // see if the file name for the selection has already been loaded into FileNameDict, else get it from the DB
+        string? fileName = FileNameDict.TryGetValue(selection.FileId, out string? value) ? value : Database.Transaction(cp => FileTable.GetById(cp, selection.FileId))?.Name;
+
+        // do not try to get updates and text snippet since there is no file anymore
+        if (fileName == null)
+            goto End;
+
+        // if fileName == null the file has been deleted
+        FileNameDict[selection.FileId] = fileName;
+
+        // get updates from EditorHub if file is actively used
+        var updates = EditorHub.GetCurrentState(selection.FileId);
+
+        // if updates is still null load the updates from disk
+        updates ??= FileTable.GetFileState(selection.FileId);
+
+        // Invoke JavaScript to get the text snippet based on the selection details
+        string returnText = await JavaScript.InvokeAsync<string>("getTextSnippet", updates, selection.ClientStart, selection.ClockStart, selection.ClientEnd, selection.ClockEnd);
+
+        // if there is no map for the corresponding file, create it
+        if (!TextSnippetDict.ContainsKey(selection.FileId))
+            TextSnippetDict[selection.FileId] = new Dictionary<int, string?>();
+        
+        // Add the retrieved text snippet to the list, (as null if it's empty)
+        TextSnippetDict[selection.FileId][message.Id] = returnText;
+
+        End:
+        if (invokeStateHasChanged)
+            InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        if (scrollDown)
+            await JavaScript.InvokeVoidAsync("scrollToBottomInChat");
+    }
+
+    private string? GetTextSnippet(MessageEntry message)
+    {
+        // if the selection has not been loaded or does not exist, return null
+        if (!SelectionDict.ContainsKey(message.Id) || SelectionDict[message.Id] == null)
+            return null;
+        
+        int fileId = SelectionDict[message.Id]!.FileId;
+
+        // if the file is not loaded or the corresponding map does not contain the messageId return null
+        if(!TextSnippetDict.ContainsKey(fileId) || !TextSnippetDict[fileId].ContainsKey(message.Id))
+            return null;
+
+        string? textSnippet = TextSnippetDict[fileId][message.Id];
+        
+        // if check whether text has been deleted
+        if (String.IsNullOrWhiteSpace(textSnippet))
+            textSnippet = "<Text gelöscht>";
+        
+        return textSnippet;
+    }
+    
+    ///<summary>
+    /// Long lines of code are truncated. 
+    /// </summary>
+    private string GetTruncatedText(string? text, int maxLines)
+    {
+        if (text == null)
+            return "";
+
+        string[] lines = text.Split(new[]
+            {
+                '\r', '\n'
+            },
+            StringSplitOptions.RemoveEmptyEntries);
+
+        string result = string.Join("\n", lines.Take(maxLines));
+
+        return result + (lines.Length > maxLines ? "\n..." : "");
+    }
+
+    private string? GetFileName(MessageEntry message)
+    {
+
+        if(!SelectionDict.ContainsKey(message.Id) || 
+           SelectionDict[message.Id] == null || 
+           !FileNameDict.ContainsKey(SelectionDict[message.Id]!.FileId))
+            return null;
+        return FileNameDict[SelectionDict[message.Id]!.FileId];
+
+    }
+
+    /// <summary>
+    /// Update the file name in dictionaries independently of any instance of Chat.
+    /// </summary>
+    private bool UpdateFileName(FileEntry file)
+    {
+        if (!FileNameDict.ContainsKey(file.Id))
+            return false;
+        FileNameDict[file.Id] = file.Name;
+
+        InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        return true;
+    }
+
+    /// <summary>
+    /// Remove file from dictionaries independently of any instance of Chat.
+    /// </summary>
+    private bool UpdateFileDeleted(FileEntry file)
+    {
+        if (!FileNameDict.ContainsKey(file.Id))
+            return false;
+        
+        foreach (var key in TextSnippetDict[file.Id])
+            SelectionDict[key.Key] = null;
+        
+        FileNameDict.Remove(file.Id);
+        TextSnippetDict.Remove(file.Id);
+        InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+        return true;
+    }
+    
+    
+    /// <summary>
+    /// Gets the user color for the background color of the chat messages.
+    /// </summary>
+    private string UserColor(MessageEntry message)
+    {
+        var userAndStatus = ProjectUsers.Find(x => x.User.Id == message.UserId);
+        if (userAndStatus != null)
+            switch (userAndStatus.Status)
+            {
+                case UserStatus.Online:
+                    return userAndStatus.Color + "80";
+                case UserStatus.Elsewhere:
+                    return "var(--background-colored)";
+            }
+        return "var(--bubble-grey)";
+    }
+    
+    private string GetUserName(MessageEntry message)
+        => ProjectUsers.Find(x => x.User.Id == message.UserId)?.User.Username ?? "Unbekannter User";
+
+    /// <summary>
+    /// Wrapper method to bind two methods on @oninput of the send message button.
+    /// </summary>
+    private void HandleCombinedInput(ChangeEventArgs e)
+    {
+        NewMessage = e.Value?.ToString() ?? ""; // without this, MessageLength will not be updated
+        NewMessage = e.Value?.ToString() ?? ""; // without this, MessageLength will not be updated
+        MessageLength = NewMessage.Length;
+        HandleUserSuggestions(e);
+    }
+    
+    /// <summary>
+    /// Opens the user suggestions list when user enters an '@' symbol.
+    /// </summary>
+    private void HandleUserSuggestions(ChangeEventArgs e)
+    {
+        if (e.Value is not string input)
+            return;
+        
+        if (input.EndsWith("@"))
+        {
+            ShowUserSuggestions = true;
+            // remove yourself from the user suggestion list
+            FilteredUsers = ProjectUsers.FindAll(x => x.User.Id != AuthService.User.Id);
+        }
+        else if (ShowUserSuggestions)
+        {
+            var lastIndex = input.LastIndexOf('@');
+            if (lastIndex >= 0)
+            {
+                var searchText = input[(lastIndex + 1)..].ToLower();
+                FilteredUsers = FilteredUsers
+                    .Where(u => u.User.Username.ToLower()
+                        .Contains(searchText, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                ShowUserSuggestions = FilteredUsers.Any();
+            }
+            else
+            {
+                ShowUserSuggestions = false;
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Adds the selected user from the suggestion list into the chat message.
+    /// </summary>
+    private void SelectUser(string username)
+    {
+        var lastIndex = NewMessage.LastIndexOf('@');
+        if (lastIndex >= 0)
+        {
+            NewMessage = NewMessage[..(lastIndex + 1)] + username;
+            ShowUserSuggestions = false;
+        }
+    }
+    
+    private async Task ScrollToMessage(int? messageIdV)
+    {
+        if (messageIdV == null)
+            return;
+        int messageId = messageIdV.Value;
+        // check if message is already in the chat -> scroll directly to the response
+        var requestedResponseMessage = 
+            Messages.FirstOrDefault(x => x.Id == messageId);
+        
+        if (requestedResponseMessage == null)
+        {
+            if (ProjectId != null)
+            {
+                requestedResponseMessage =  Database.Transaction(cp => 
+                    MessageTable.GetById(cp, messageId));
+
+                var youngerThan = requestedResponseMessage?.Timestamp;
+                var olderThan = Messages
+                    .OrderByDescending(x => x.Timestamp)
+                    .LastOrDefault()?.Timestamp;
+                
+                var messagesToLoad = 
+                    Database.Transaction(cp => 
+                        MessageTable.ListMessagesUntilClickedResponse(cp, 
+                            ProjectId.Value, youngerThan, olderThan));
+                
+                foreach (var message in messagesToLoad)
+                {
+                    Messages.Add(message);
+                    await InvokeAsync(() => LoadResponse(message, false));
+                    await InvokeAsync(() => LoadSelection(message, true));
+                }
+            }
+            await JavaScript.InvokeVoidAsync("scrollToTopInChat");
+        }
+        else
+        {
+            await JavaScript.InvokeVoidAsync("scrollToMessage", messageId);
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SendMessage();
+            NewMessage = "";
+            MessageLength = 0;
+        }
+        
+    }
+    
+    private void HandleLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (Selection.Length != 0)
+            InvokeAsync(SetSelection);
+        SelectionBeforeEditing = [];
+    }
+    
+    public void Dispose()
+    {
+        if (Selection.Length != 0)
+            InvokeAsync(SetSelection); 
+        
+        SharedData.Changed -= LoadProject;
+        MessageManager.MessageSent -= ReceiveMessage;
+        NavigationManager.LocationChanged -= HandleLocationChanged;
+
+        FileManager.Events.FileMetadataChanged -= UpdateFileName;
+        FileManager.Events.FileDeleted -= UpdateFileDeleted;
+    }
+}

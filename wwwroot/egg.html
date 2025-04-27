@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="dark">
+    <base href="/" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>Kinomodus</title>
+    <style>
+        @font-face {
+            font-family: 'roboto';
+            font-style: normal;
+            font-weight: 400;
+            font-display: block;
+            src: url('/fonts/roboto.woff2') format('woff2'), url('/fonts/roboto.woff') format('woff'), url('/fonts/roboto.ttf') format('truetype'), url('/fonts/roboto.otf') format('otf'), url('/fonts/roboto.eot') format('embedded-opentype'), url('/fonts/roboto.svg') format('svg');
+            unicode-range: U+000-5FF;
+        }
+        body {
+            font-size: min(5vh, 5vw);
+            font-family: 'roboto';
+            width: 100dvw;
+            height: 100dvh;
+            margin: 0;
+            padding: 0;
+            background-color: black;
+            color: white;
+            overflow: hidden;
+            cursor: none;
+        }
+        #egg-scroller {
+            position: absolute;
+            width: 100dvw;
+            height: fit-content;
+            text-align: center;
+            animation: eggScroller 60s linear forwards;
+            overflow: hidden;
+            color: #c0c0c0;
+        }
+        @keyframes eggScroller {
+            0% { top: 100%; }
+            100% { top: calc(100dvh - var(--egg-height)); }
+        }
+        p {
+            margin: min(25vh, 25vw) 0;
+        }
+        small {
+            color: #666666;
+        }
+        .egg-full {
+            width: 100dvw;
+            height: 100dvh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .egg-name {
+            margin: auto;
+            width: min(60vh, 60vw);
+            height: min(15vh, 15vw);
+            filter: grayscale(1) contrast(2) brightness(2);
+        }
+        .egg-logo {
+            margin: auto;
+            width: min(30vh, 30vw);
+            height: min(30vh, 30vw);
+            animation: eggFlasher 1s linear infinite;
+        }
+        @keyframes eggFlasher {
+            0% { filter: grayscale(1) brightness(1); }
+            100% { filter: grayscale(1) brightness(0.69); }
+        }
+    </style>
+</head>
+<body style="--egg-height: -9001dvh;">
+<div id="egg-scroller">
+    <div class="egg-full"><img class="egg-name" src="/cocoding_text.svg" alt="cocoding"/></div>
+    <p><span id="egg-nerd-0">Nerd A</span><br/><small>Entwickler</small></p>
+    <p><span id="egg-nerd-1">Nerd B</span><br><small>Entwickler</small></p>
+    <p><span id="egg-nerd-2">Nerd C</span><br/><small>Entwickler</small></p>
+    <p><span id="egg-nerd-3">Nerd D</span><br/><small>Entwickler</small></p>
+    <p><span id="egg-nerd-4">Nerd E</span><br/><small>Entwickler</small></p>
+    <p>Thomas Kasakowskij<br/><small>Kunde</small></p>
+    <p>Paul Christ<br/><small>Beisitzer</small></p>
+    <p>FernUni Hagen<br/><small>Standortanbieter</small></p>
+    <p>Contabo<br/><small>1. Serverbetreiber</small></p>
+    <p>Hetzner<br/><small>2. Serverbetreiber</small></p>
+    <p>Koko<br/><small>Erfinder der Kokosnuss</small></p>
+    <p>Graham Bell<br/><small>Erfinder der Klingel</small></p>
+    <p>Salvino D'Armati<br/><small>Erfinder von C#</small></p>
+    <div class="egg-full"><img class="egg-logo" src="/cocoding_icon.svg" alt="Logo"/></div>
+</div>
+<script>
+    const nerds = ["Bernd Reiß", "Dennis Erdmann", "Florian Pompowski", "Judith Göd", "Ole Stollreiter"];
+    for (let i = nerds.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [nerds[i], nerds[j]] = [nerds[j], nerds[i]];
+    }
+    for (let i = 0; i < nerds.length; i++) {
+        document.getElementById("egg-nerd-" + i).innerText = nerds[i];
+    }
+    window.onresize = () => {
+        document.body.style.setProperty("--egg-height", `${document.getElementById("egg-scroller").getBoundingClientRect().height}px`);
+    }
+    window.onresize(null);
+</script>
+</body>
+</html>

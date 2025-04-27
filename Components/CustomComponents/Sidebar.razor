@@ -1,0 +1,307 @@
+@using cocoding.Components.Pages
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject SharedDataService SharedData
+@inject IJSRuntime JavaScript
+
+<!-- Don't show if the current page isn't the fully loaded editor -->
+@if (NavigationManager.Path() == "/editor" && SharedData.ViewedFile != null) {
+    <div class="sidebar@(SharedData.MobileSidebarShown ? " mobile-visible" : "")">
+        <div class="tab-list">
+            <!-- Tab buttons -->
+            <a href="javascript:" class="icon icon-folder sidebar-icon @(Tab==0?"selected":"")" @onclick="async () => await SwitchTab(0)"></a>
+            <a href="javascript:" class="icon icon-chat tab-list-hide sidebar-icon @(Tab==1?"selected":"")" @onclick="async () => await SwitchTab(1)"></a>
+            <a href="javascript:" class="icon icon-people sidebar-icon @(Tab==2?"selected":"")" @onclick="async () => await SwitchTab(2)"></a>
+            <span class="tab-list-hide" style="flex-grow: 1"></span>
+
+            <!-- Additional buttons (not tab-related) -->
+            <a class="icon icon-download sidebar-icon" href="javascript:" onclick="downloadThisFile('@SharedData.ViewedFile.Name')" title="Diese Datei herunterladen"></a>
+            <a class="icon icon-journal-plus tab-list-hide sidebar-icon" href="javascript:" @onclick="OpenVersionCreationModal" title="Neue Version erstellen"></a>
+            <a class="icon icon-clock-history tab-list-hide sidebar-icon" href="/versions?id=@(SharedData.ViewedFile?.Id)" title="Zu Versionen wechseln"></a>
+        </div>
+        <BrowseTreeComponent ProjectData="RootNodeData" Class=@($"tab {(Tab==0?"current-tab":"")}")/>
+        <div class="tab chat @(Tab==1?"current-tab":"")">
+            <Chat ProjectUsers="@ProjectUsers"/>
+        </div>
+        <div class="tab users @(Tab==2?"current-tab":"")">
+            @foreach (var userAndStatus in ProjectUsers) {
+                <a href="/user?id=@(userAndStatus.User.Id)" class="user">
+                    <span class="user-info">
+                        <span class="icon @(userAndStatus.IsMobile && userAndStatus.Status == UserStatus.Online ? "icon-phone-fill" : "status") @(userAndStatus.Status.ToString().ToLower())" style="@userAndStatus.IconStyle"></span>
+                        <span class="name">@userAndStatus.User.DisplayName</span>
+                    </span>
+                </a>
+                <a href="/editor?id=@(userAndStatus.CurrentFileId)">
+                    <span class="filestatus @(userAndStatus.CurrentFileName == null ? "hidden" : "")">
+                        <span class="icon icon-file-earmark"></span><span class="filename">@userAndStatus.CurrentFileName</span>
+                        <span class="icon icon-list-ol @(userAndStatus.LineNumber == null ? "hidden" : "")"></span><span class="line-number">@userAndStatus.LineNumber</span>
+                    </span>
+                </a>
+            }
+        </div>
+    </div>
+}
+
+<Modal @ref="@VersionCreationModal" Title="Neue Version erstellen" OnClose="OnVersionCreationModalClose">
+    <form @onsubmit="CreateVersion">
+        <div class="form-group mb-3">
+            <label for="new-label">Label (optional):</label>
+            <small class="form-text text-muted" style="float: right;">@(NewVersionLabel?.Length ?? 0)/25</small>
+            <input class="form-control" type="text" id="new-label" placeholder="Label eingeben..." @bind="NewVersionLabel" @bind:event="oninput" maxlength="25"/>
+            <label for="new-comment">Kommentar (optional):</label>
+            <small class="form-text text-muted" style="float: right;">@(NewVersionComment?.Length ?? 0)/200</small>
+            <textarea class="form-control" style="overflow-y: scroll; resize: none; height: 95px" id="new-comment" placeholder="Kommentar eingeben..." @bind="NewVersionComment" @bind:event="oninput" maxlength="200"/>
+        </div>
+        <button class="btn btn-primary" type="submit">Erstellen</button>
+    </form>
+</Modal>
+
+@code {
+    /// <summary>
+    /// The index of the selected tab or -1 if no tab is open.
+    /// </summary>
+    private int Tab = -1;
+
+    /// <summary>
+    /// The highest allowed tab index.
+    /// </summary>
+    private const int MaxTab = 2;
+
+    private ProjectNodeData? RootNodeData;
+
+    /// <summary>
+    /// Dialog shown for creating a new version.
+    /// </summary>
+    private Modal? VersionCreationModal = null;
+
+    /// <summary>
+    /// The list of users in the viewed project, along with their status and color.
+    /// </summary>
+    private List<UserAndStatus> ProjectUsers = [];
+
+    /// <summary>
+    /// Keeps track of the label for the version to create.
+    /// </summary>
+    private string? NewVersionLabel = null;
+
+    /// <summary>
+    /// Keeps track of the comment for the version to create.
+    /// </summary>
+    private string? NewVersionComment = null;
+
+    /// <summary>
+    /// Subscribes to events, loads the project data for the file tree and loads the individual state cookies.
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        NavigationManager.LocationChanged += LocationChanged;
+        SharedData.Changed += LoadProject;
+        FileManager.Events.FileMetadataChanged += UpdateFileName;
+
+        if (bool.TryParse(await JavaScript.GetCookieAsync("MobileSidebarShown") ?? "false", out var mobileSidebarShown) && mobileSidebarShown)
+            SharedData.MobileSidebarShown = true;
+
+        LoadProject();
+        EditorHub.UserListChanged += LoadStatuses;
+
+        string? editorTabString = await JavaScript.GetCookieAsync("EditorTab");
+        Tab = editorTabString != null && int.TryParse(editorTabString, out var tab) && tab is >= -1 and <= MaxTab
+            ? tab
+            : 0;
+    }
+
+    /// <summary>
+    /// Loads the root node of the file tree using the viewed file's project ID.
+    /// </summary>
+    private void LoadProject()
+    {
+        if (SharedData.ViewedFile != null)
+        {
+            if (RootNodeData != null && SharedData.ViewedFile.ProjectId == RootNodeData.Project.Id)
+            {
+                CallStateHasChanged();
+                return;
+            }
+
+            var project = Database.Transaction(cp => ProjectTable.GetById(cp, SharedData.ViewedFile.ProjectId));
+            if (project != null)
+            {
+                RootNodeData = new ProjectNodeData(project);
+                ProjectUsers = Database.Transaction(cp => AssignmentTable.ListByProject(cp, project.Id)
+                    .Select(assignment => UserTable.GetById(cp, assignment.UserId))
+                    .OfType<UserEntry>()
+                    .Select(user => new UserAndStatus(user, UserStatus.Offline, "#000000", isMobile: false))
+                    .ToList());
+                LoadStatuses();
+                CallStateHasChanged();
+                return;
+            }
+        }
+
+        RootNodeData = null;
+        CallStateHasChanged();
+    }
+
+    /// <summary>
+    /// Opens the modal for creating a new version.
+    /// </summary>
+    private void OpenVersionCreationModal()
+    {
+        VersionCreationModal?.Open();
+    }
+
+    /// <summary>
+    /// Closes the modal for creating a new version.
+    /// </summary> 
+    private void OnVersionCreationModalClose()
+    {
+        NewVersionLabel = null;
+        NewVersionComment = null;
+    }
+
+    /// <summary>
+    /// Creates a new version of the currently active file.
+    /// </summary>
+    private void CreateVersion()
+    {
+
+        if (string.IsNullOrWhiteSpace(NewVersionLabel))
+            NewVersionLabel = null;
+
+        if (string.IsNullOrWhiteSpace(NewVersionComment))
+            NewVersionComment = null;
+        JavaScript.InvokeVoidAsync("createVersion", NewVersionLabel, NewVersionComment);
+        VersionCreationModal?.Close();
+        OnVersionCreationModalClose();
+    }
+
+    /// <summary>
+    /// Method to indicate that the state has changed from other threads.
+    /// </summary>
+    private void CallStateHasChanged()
+        => InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Reloads the viewed project when the location has changed and closes the version creation modal (if open). 
+    /// </summary>
+    private void LocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        VersionCreationModal?.Close();
+        LoadProject();
+    }
+
+    /// <summary>
+    /// Switches to the tab with the provided index or closes the tab if it matches the currently selected tab.
+    /// </summary>
+    private async Task SwitchTab(int tab)
+    {
+        if (tab is < -1 or > MaxTab)
+            return;
+
+        Tab = Tab == tab ? -1 : tab;
+        await JavaScript.SetCookieAsync("EditorTab", Tab.ToString(), DateTime.UtcNow.AddDays(30));
+    }
+
+    /// <summary>
+    /// Updates the status and color of each user in the user list.
+    /// </summary>
+    private void LoadStatuses()
+    {
+        foreach (var userAndStatus in ProjectUsers)
+        {
+            FileGroupSession? currentSession = null;
+            int? changedFileId = null; // keep track so we only have to reload once
+            
+            // search for user in file groups and update information if found
+            // set the session data after looking through everything -> there could be multiple sessions for one 
+            // user -> we only want the most recent
+            foreach (var fileGroup in EditorHub.FileGroups.Values)
+            {
+                foreach (var session in fileGroup.Sessions.Values)
+                {
+                    // wrong user
+                    if (session.UserId != userAndStatus.User.Id)
+                        continue;
+
+                    // we found a more recent session already
+                    if (currentSession != null && session.TimeStamp < currentSession.TimeStamp)
+                        continue;
+
+                    // reset file flag
+                    changedFileId = null;
+
+                    // we need to set the online state, while we are in the filegroup
+                    userAndStatus.Status = SharedData.ViewedFile?.Id == fileGroup.FileId ? UserStatus.Online : UserStatus.Elsewhere;
+
+                    if (userAndStatus.CurrentFileId == null || userAndStatus.CurrentFileId != fileGroup.FileId)
+                        changedFileId = fileGroup.FileId;
+
+                    currentSession = session;
+                }
+                
+            }
+
+            // if a session has been found, update information else set to offline and unset all file related information
+            if (currentSession != null)
+            {
+                userAndStatus.Color = currentSession.Color;
+                userAndStatus.LineNumber = userAndStatus.Status == UserStatus.Online ? currentSession.LineNumber : null;
+                userAndStatus.IsMobile = currentSession.IsMobileDevice;
+                if (changedFileId != null)
+                {
+                    var file = Database.Transaction(cp => FileTable.GetById(cp, (int)changedFileId));
+                    if (file != null && file.ProjectId == SharedData.ViewedFile?.ProjectId)
+                    {
+                        userAndStatus.CurrentFileId = file.Id;
+                        userAndStatus.CurrentFileName = file.Name;
+                    }
+                    else
+                    {
+                        userAndStatus.CurrentFileId = null;
+                        userAndStatus.CurrentFileName = null;
+                    }
+                }
+            }
+            else
+            {
+                userAndStatus.Status = UserStatus.Offline;
+                userAndStatus.CurrentProjectId = null;
+                userAndStatus.CurrentFileId = null;
+                userAndStatus.CurrentFileName = null;
+                userAndStatus.LineNumber = null;
+                userAndStatus.IsMobile = false;
+                userAndStatus.Color = "#000000";
+            }
+        }
+
+        ProjectUsers = ProjectUsers.OrderBy(x => x.Status).ThenBy(x => x.User.DisplayName).ToList();
+        CallStateHasChanged();
+    }
+
+    /// <summary>
+    /// Updates the file name in ProjectUsers.
+    /// </summary>
+    private bool UpdateFileName(FileEntry file)
+    {
+        foreach (var user in ProjectUsers.Where(user => user.CurrentFileId == file.Id))
+        {
+            user.CurrentFileId = file.Id;
+            user.CurrentFileName = file.Name;
+        }
+
+        
+        CallStateHasChanged();
+        return true;
+    }
+
+    /// <summary>
+    /// Unsubscribes from all events.
+    /// </summary>
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= LocationChanged;
+        SharedData.Changed -= LoadProject;
+        FileManager.Events.FileMetadataChanged -= UpdateFileName;
+        EditorHub.UserListChanged -= LoadStatuses;
+    }
+}

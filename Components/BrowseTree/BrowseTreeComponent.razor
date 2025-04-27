@@ -1,0 +1,204 @@
+@implements IDisposable
+@inject SharedDataService SharedData
+@inject IJSRuntime JavaScript
+
+<!-- Wrapper for the root node to enable scrolling and other options specified by the "Class" parameter -->
+<div class="@(Class == null ? "" : $"{Class} ")xy no-select">
+    <div>
+        <!-- Root node for the project -->
+        <BrowseNode Data="ProjectData"/>
+    </div>
+</div>
+
+@code {
+    private ProjectNodeData? _ProjectData = null;
+#pragma warning disable BL0007
+    /// <summary>
+    /// The data object associated with the root node.<br/>
+    /// Watches for changes in order to keep event subscriptions of the new and old data objects up-to-date. 
+    /// </summary>
+    [Parameter]
+    public ProjectNodeData? ProjectData
+    {
+        get => _ProjectData;
+        set
+        {
+            if (_ProjectData == value)
+                return;
+            
+            // unsubscribe old data object if present
+            UnsubscribeDataEvents();
+            
+            _ProjectData = value;
+            
+            // subscribe new data object if present
+            if (value != null)
+            {
+                FileManager.Events.ProjectMetadataChanged += value.HandleProjectMetadataChanged;
+                FileManager.Events.FolderMetadataChanged += value.HandleFolderMetadataChanged;
+                FileManager.Events.FileMetadataChanged += HandleFileMetadataChanged;
+                FileManager.Events.FolderDeleted += value.HandleFolderDeleted;
+                FileManager.Events.FileDeleted += value.HandleFileDeleted;
+                FileManager.Events.FolderCreated += HandleFolderCreated;
+                FileManager.Events.FileCreated += value.HandleFileCreated;
+            }
+        }
+    }
+#pragma warning restore BL0007
+
+    /// <summary>
+    /// The CSS class(es) to use in addition for the root node wrapper.
+    /// </summary>
+    [Parameter]
+    public string? Class { get; set; }
+
+    /// <summary>
+    /// The ID of the folder that was last expanded, to avoid trying to expand the path to the viewed file over and over again.
+    /// </summary>
+    private int? LastExpandedFolder = null;
+    
+    /// <summary>
+    /// Binds events, and loads and applies the list of expanded folders.
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        SharedData.Changed += SharedDataChanged;
+        
+        if (ProjectData == null)
+            return;
+
+        // keep track of whether the set of expanded folders has changed
+        bool expandedDirty = false;
+        
+        HashSet<int> expandedFolderIds = await JavaScript.GetExpandedFolders(ProjectData.Project.Id);
+        HashSet<int> unknownFolderIds = [..expandedFolderIds];
+        
+        // expand known nodes, only unknown (deleted) nodes are left in the set 
+        ProjectData.Expand(unknownFolderIds);
+        if (unknownFolderIds.Count > 0)
+        {
+            // remove unknown (deleted) nodes from the set
+            expandedDirty = true;
+            foreach (var folderId in unknownFolderIds)
+                expandedFolderIds.Remove(folderId);
+        }
+
+        // expand path to the viewed file if present
+        if (ExpandFolder(SharedData.ViewedFile?.ParentId, expandedFolderIds))
+        {
+            ProjectData.Expand([..expandedFolderIds]);
+            expandedDirty = true;
+        }
+        
+        SharedData.ExpandedFolderIds[ProjectData.Project.Id] = expandedFolderIds;
+        
+        // save as cookie if modified
+        if (expandedDirty)
+            await JavaScript.SetExpandedFolders(ProjectData.Project.Id, expandedFolderIds);
+    }
+
+    /// <summary>
+    /// Automatically expands the path to the viewed file if present.
+    /// </summary>
+    private void SharedDataChanged()
+    {
+        if (SharedData.ViewedFile != null && ProjectData != null && SharedData.ViewedFile.ProjectId == ProjectData.Project.Id
+            && LastExpandedFolder != SharedData.ViewedFile.ParentId
+            && SharedData.ExpandedFolderIds.TryGetValue(ProjectData.Project.Id, out var expandedFolderIds))
+        {
+            if (ExpandFolder(SharedData.ViewedFile.ParentId, expandedFolderIds))
+            {
+                ProjectData.Expand([..expandedFolderIds]);
+                _ = JavaScript.SetExpandedFolders(ProjectData.Project.Id, expandedFolderIds);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Expands the path for the given folder ID, while using the given set of expanded folder IDs.
+    /// </summary>
+    private bool ExpandFolder(int? folderId, HashSet<int> expandedFolderIds)
+    {
+        LastExpandedFolder = folderId;
+        
+        bool dirty = false;
+
+        while (folderId != null)
+        {
+            if (expandedFolderIds.Contains(folderId.Value))
+                return dirty;
+            
+            var folder = Database.Transaction(cp => FolderTable.GetById(cp, folderId.Value));
+            if (folder == null)
+                return dirty;
+            
+            expandedFolderIds.Add(folderId.Value);
+            dirty = true;
+
+            folderId = folder.ParentId;
+        }
+        
+        return dirty;
+    }
+
+    /// <summary>
+    /// Calls the data object's event handler and updates the viewed file in the <c>SharedDataService</c> if it's present and affected by the change.
+    /// </summary>
+    private bool HandleFileMetadataChanged(FileEntry file)
+    {
+        if (ProjectData != null && ProjectData.HandleFileMetadataChanged(file))
+        {
+            if (SharedData.ViewedFile != null && SharedData.ViewedFile.Id == file.Id)
+                SharedData.ViewedFile = file;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Calls the data object's event handler and adds the new folder to the set of expanded folders since it's automatically expanded in the handler.
+    /// </summary>
+    public bool HandleFolderCreated(FolderEntry folder)
+    {
+        if (ProjectData == null)
+            return false;
+
+        if (ProjectData.HandleFolderCreated(folder)
+            && SharedData.ExpandedFolderIds.TryGetValue(ProjectData.Project.Id, out var expandedFolderIds))
+        {
+            expandedFolderIds.Add(folder.Id);
+            _ = JavaScript.SetExpandedFolders(ProjectData.Project.Id, expandedFolderIds);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Unsubscribes the data object from the file system events.
+    /// </summary>
+    private void UnsubscribeDataEvents()
+    {
+        if (ProjectData == null)
+            return;
+        
+        FileManager.Events.ProjectMetadataChanged -= ProjectData.HandleProjectMetadataChanged;
+        FileManager.Events.FolderMetadataChanged -= ProjectData.HandleFolderMetadataChanged;
+        FileManager.Events.FileMetadataChanged -= HandleFileMetadataChanged;
+        FileManager.Events.FolderDeleted -= ProjectData.HandleFolderDeleted;
+        FileManager.Events.FileDeleted -= ProjectData.HandleFileDeleted;
+        FileManager.Events.FolderCreated -= HandleFolderCreated;
+        FileManager.Events.FileCreated -= ProjectData.HandleFileCreated;
+    }
+
+    /// <summary>
+    /// Unsubscribes from all events.
+    /// </summary>
+    public void Dispose()
+    {
+        SharedData.Changed -= SharedDataChanged;
+        
+        UnsubscribeDataEvents();
+    }
+}

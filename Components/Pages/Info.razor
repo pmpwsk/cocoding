@@ -1,0 +1,47 @@
+﻿@page "/info"
+
+<CoCoTitleH>Programminformationen</CoCoTitleH>
+
+<div class="mb-3">
+    <h3>Version</h3>
+    &#x1F965; <a href="/egg.html">&#x1F514;</a> v@(Global.VersionString)
+</div>
+
+<div class="mb-3">
+    <h3>Entwickler</h3>
+    <ul>
+        @foreach (var name in Developers) {
+            <li>@name</li>
+        }
+    </ul>
+</div>
+
+<div class="mb-3">
+    <h3>Links</h3>
+    <ul>
+        <li><a href="https://cocoding.fernuni-hagen.de/">Offizielle Instanz</a></li>
+        <li><a href="https://catalpa-gitlab.fernuni-hagen.de/ks/fapra/fachpraktikum-2024/alpha/collaborative-coding-plattform">Quellcode</a></li>
+    </ul>
+</div>
+
+@code {
+    private List<string> Developers = [];
+
+    protected override void OnInitialized()
+    {
+        Developers = Shuffle(["Bernd Reiß", "Dennis Erdmann", "Florian Pompowski", "Judith Göd", "Ole Stollreiter"]);
+    }
+
+    private List<string> Shuffle(List<string> list)
+    {
+        list = [..list];
+        int n = list.Count;  
+        while (n > 1)
+        {  
+            n--;  
+            int k = Random.Shared.Next(n + 1);  
+            (list[k], list[n]) = (list[n], list[k]);
+        }
+        return list;
+    }
+}

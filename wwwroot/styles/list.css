@@ -1,0 +1,125 @@
+.list-item {
+    color: var(--text);
+    text-decoration: none;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--line);
+    padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+    border-radius: 0.25rem;
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+    overflow: hidden;
+    background-color: var(--background-colored);
+}
+
+.list-item:has(.opener:hover), a.list-item:hover {
+    cursor: pointer;
+    color: var(--text);
+    filter: brightness(90%);
+}
+
+.list-item.project {
+    padding: 0.75rem 0.75rem 0.75rem 1rem;
+    border: 2px solid var(--line);
+    font-size: 1.1rem;
+    background: var(--background-colored);
+}
+
+.list-item.project .name {
+    text-shadow: 0 0 2px var(--line);
+}
+
+.list-item.project .toggle {
+    margin-left: 0;
+}
+
+.list-item.folder {
+    background: var(--background-colored);
+}
+
+.list-item.file {
+    background: var(--background-medium);
+}
+
+.list-item > :first-child {
+    flex: 1 1;
+}
+
+.list-item > a {
+    text-decoration: none;
+    color: var(--text);
+}
+
+.list-item > .inline-select {
+    background: var(--background-medium);
+    border: 1px solid var(--line);
+}
+
+.list-item .name {
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+}
+
+.list-item > div:has(.name) {
+    overflow: hidden;
+}
+
+.list-item .opener {
+    flex: 1 1;
+    margin: -0.5rem 0 -0.5rem -0.75rem;
+    padding: 0.5rem 0 0.5rem 0.75rem;
+    overflow: hidden;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+.list-item > span:first-child {
+    overflow: hidden;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+.list-item.project .opener {
+    margin: -0.75rem 0;
+    padding: 0.75rem 0;
+}
+
+.sq {
+    display: inline-block;
+    width: 1.3rem;
+    height: 1.3rem;
+    margin: 0.1rem 0.1rem 0.1rem 0.35rem;
+    padding: 0;
+    top: 0;
+    border: none;
+    flex-shrink: 0;
+}
+
+.details {
+    margin-top: 0.5rem;
+    padding-left: 0.4rem;
+    color: var(--text-lower);
+}
+
+.details:first-child {
+    margin-top: 0.25rem;
+}
+
+.details u {
+    color: var(--text);
+    margin-left: -0.4rem;
+    text-decoration: none;
+}
+
+.details ul {
+    padding: 0;
+}
+
+.details ul li {
+    text-indent: 0;
+}
+.details ul li:before {
+    content: none;
+}

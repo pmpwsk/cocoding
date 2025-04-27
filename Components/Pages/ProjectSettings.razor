@@ -1,0 +1,314 @@
+﻿@page "/project-settings"
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JavaScript
+
+@if(ViewedProject != null && UsersAndRoles != null) {
+    <CoCoTitleH>Projekt-Einstellungen</CoCoTitleH>
+
+    <p>@ViewedProject.Name</p>
+
+    if (Role >= ProjectRole.Owner) {
+        <div class="form-group mb-3">
+            <label for="new-project-name">Name:</label>
+            <input class="form-control"
+            type="text" id="new-project-name"
+            placeholder="Projektnamen eingeben..."
+            @bind="@Name"/>
+        </div>
+        <div class="form-group mb-3">
+            <label for="new-project-description">Beschreibung:</label>
+            <input class="form-control" type="text" id="new-project-description" placeholder="Projektbeschreibung eingeben..." @bind="@Description"/>
+        </div>
+        <div class="form-group mb-3">
+            <label for="new-project-indent">Einrückung (Spaces):</label>
+            <label for="new-project-indent"
+                id="new-project-indent-notice" style="display: block; color: var(--console-red); font-style: italic; font-size: 0.85em;">
+                Hinweis: Existierende Dateien behalten weiterhin ihre ursprüngliche Einrückung.
+                Erst bei erneuter Bearbeitung wird die neu eingestellte Einrückung übernommen.
+            </label>
+            <input class="form-control" type="number" id="new-project-indent" placeholder="Einrückung in Spaces angeben..." @bind="@Indent"/>
+        </div>
+        @if (ErrorMessage != null) {
+            <p class="text-danger mb-3">@ErrorMessage</p>
+        }
+        <button type="button" class="btn d-block btn-primary mb-3" @onclick="EditProject">Speichern</button>
+
+        <button type="button" class="btn d-block btn-danger mb-3" @onclick="OpenDeletionModal">Projekt löschen</button>
+
+        <Modal @ref="@DeleteProjectModal" Title=@($"Projekt löschen: {ViewedProject?.Name}")>
+            <!-- Shows an extra warning if there are files being used in the project and lists the active users -->
+            @if (ActiveUsers.Count > 0) {
+                <p class="danger">Achtung: In diesem Projekt ist gerade mindestens eine Datei in Bearbeitung im Editor! Bitte stellen Sie sicher, dass dieses Projekt tatsächlich gelöscht werden kann!</p>
+                <div>
+                    <u>Aktive Nutzer:</u>
+                    <ActiveUserList Users="@ActiveUsers"/>
+                </div>
+                <button class="btn btn-danger me-2" @onclick="() => ActiveUsers = []">Trotz Bearbeitung Projekt löschen</button>
+            } else {
+                <p class="danger">Wirklich löschen? Wenn Sie das Projekt löschen, dann werden alle Projekt-Dateien gelöscht und die Nutzer haben keinen Zugriff mehr auf Projekt und Dateien!</p>
+                <button type="button" class="btn btn-danger me-2" @onclick="DeleteProject">Ja, Projekt dauerhaft löschen</button>
+            }
+            <button type="button" class="btn btn-primary" @onclick="() => { DeleteProjectModal?.Close(); }">Abbrechen</button>
+        </Modal>
+    }
+
+    <button type="button" class="btn d-block btn-danger mb-3" @onclick="OpenLeaveProjectModal">Projekt verlassen</button>
+
+    <Modal @ref="@LeaveProjectModal" Title=@($"Projekt verlassen: {ViewedProject?.Name}")>
+        @if (Role == ProjectRole.Owner && UsersAndRoles.All(u => u.SelectedRole != ProjectRole.Owner)) {
+            <p class="danger">Achtung: Sie sind Projektbesitzer! Bitte stellen Sie zunächst sicher, dass in diesem Projekt mindestens ein Projektbesitzer verbleibt!</p>
+        } else {
+            <p class="danger">Projekt wirklich verlassen? Wenn Sie das Projekt verlassen, dann haben Sie keinen Zugriff mehr auf Projekt und Dateien!</p>
+            <button type="button" class="btn btn-danger me-2" @onclick="LeaveProject">Ja, Projekt dauerhaft verlassen</button>
+        }
+        <button type="button" class="btn btn-primary" @onclick="() => { LeaveProjectModal?.Close(); }">Abbrechen</button>
+    </Modal>
+
+    if (Role >= ProjectRole.Manager)
+    {
+        <h2 class="mb-2">Teilnehmer</h2>
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <input type="text" class="form-control mb-3" placeholder="Filter nach Namen..." @oninput="OnInputChanged" />
+            <div class="d-flex align-items-center sort-margin ml-3 mb-3">
+                <label for="sort-option" class="mb-0 mr-2">Sortierung:</label>
+                <select id="sort-option" class="form-select inline-select" value="@SortOption" @onchange="SortOptionChanged">
+                    <option value="name">Name</option>
+                    <option value="role">Rolle</option>
+                </select>
+            </div>
+        </div>
+
+        @foreach (var userAndRole in GetSortedUsers()) {
+            @if (Role >= ProjectRole.Owner || userAndRole.SelectedRole < ProjectRole.Manager) {
+                <div class="list-item">
+                    <span>@userAndRole.DisplayedName</span>
+                    <select class="form-select inline-select" @bind="userAndRole.SelectedRoleString">
+                        @foreach (ProjectRole role in GetAvailableRoles()) {
+                            <option value="@role.ToString()">@role.ToGerman()</option>
+                        }
+                    </select>
+                </div>
+            }
+        }
+    }
+
+} else if(NotFound) {
+    <h1 class="text-danger">Nicht gefunden!</h1>
+}
+
+@code {
+    private ProjectEntry? ViewedProject = null;
+
+    private ProjectRole Role = ProjectRole.None;
+
+    private List<UserAndRole>? UsersAndRoles = null;
+
+    private string Name = "";
+
+    private string Description = "";
+
+    private int Indent = 0;
+
+    private bool NotFound = false;
+
+    private Modal? DeleteProjectModal;
+
+    private Modal? LeaveProjectModal;
+
+    private string? ErrorMessage = null; 
+
+    private List<UserEntry> ActiveUsers = [];
+
+    private int OtherOwnerCount = 0;
+
+    private string FilterText = string.Empty;
+
+    private string SortOption = "role";
+
+    protected override async Task OnInitializedAsync()
+    {
+        SortOption = await JavaScript.GetCookieAsync("UserSortOption") ?? "role";
+        
+        if (NavigationManager.TryGetQuery("id", out var idString) && int.TryParse(idString, out var id))
+            ViewedProject = Database.Transaction(cp =>
+                ProjectTable.GetById(cp, id));
+        ErrorMessage = null;
+
+        if (ViewedProject == null)
+            NotFound = true;
+        else
+        {
+            Role = AuthService.GetRole(ViewedProject.Id);
+            Name = ViewedProject.Name;
+            Description = ViewedProject.Description ?? "";
+            Indent = ViewedProject.Indent;
+            
+            LoadUsersAndRoles();
+        }
+    }
+
+    private void LoadUsersAndRoles()
+    {
+        if (ViewedProject == null)
+            return;
+   
+        var projectUsers = Database.Transaction(cp =>
+            AssignmentTable.ListByProject(cp, ViewedProject.Id));
+        var users = Database.Transaction(UserTable.ListAll);
+        UsersAndRoles = [];
+        foreach (var user in users.Where(u => u.Id != AuthService.User.Id))
+        {
+            var projectRole = ProjectRole.None;
+            foreach (var assignment in projectUsers.Where(assignment => assignment.UserId == user.Id))
+            {
+                projectRole = assignment.ProjectRole;
+                projectUsers.Remove(assignment);
+                break;
+            }
+
+            UsersAndRoles.Add(new(
+                ViewedProject.Id,
+                user.Id,
+                user.DisplayName,
+                projectRole));
+        }
+    }
+
+    private void EditProject()
+    {
+        if (ViewedProject == null)
+            return;
+
+        try
+        {
+            ErrorMessage = null;
+            if (ProjectManager.EditProject(ViewedProject.Id, Name, Description, Indent))
+            {
+                ViewedProject.Name = Name;
+                ViewedProject.Description = Description == "" ? null : Description;
+                FileManager.Events.ReportProjectMetadataChanged(ViewedProject);
+                DeleteProjectModal?.Close();
+                NavigationManager.NavigateTo("/");
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private void DeleteProject()
+    {
+        if (ViewedProject == null)
+            return;
+
+        ProjectManager.DeleteProject(ViewedProject.Id);
+        DeleteProjectModal?.Close();
+        NavigationManager.NavigateTo("/");
+    }
+
+    private void LeaveProject()
+    {
+        if (ViewedProject == null)
+            return;
+
+        Database.Transaction(cp => 
+            AssignmentTable.DeleteAssignment(cp, ViewedProject.Id, AuthService.User.Id));
+        LeaveProjectModal?.Close();
+        NavigationManager.NavigateTo("/");
+    }
+
+    private class UserAndRole(int projectId, int userId, string displayedName, ProjectRole selectedRole)
+    {
+        private int ProjectId = projectId;
+
+        private int UserId = userId;
+
+        public string DisplayedName = displayedName;
+
+        public ProjectRole SelectedRole = selectedRole;
+
+        public string SelectedRoleString
+        {
+            get => SelectedRole.ToString();
+            set
+            {
+                if (Enum.TryParse(value, out SelectedRole))
+                    Database.Transaction(cp =>
+                    {
+                        bool pinned = AssignmentTable.GetPinnedStatus(cp, ProjectId, UserId);
+                        AssignmentTable.DeleteAssignment(cp, ProjectId, UserId);
+                        if (SelectedRole != ProjectRole.None)
+                            AssignmentTable.CreateAssignment(cp, ProjectId, UserId, SelectedRole, pinned);
+                    });
+            }
+        }
+    }
+
+
+
+
+    /// <summary>
+    /// Checks if files are being edited in the project and opens the deletion modal
+    /// </summary>
+    private void OpenDeletionModal()
+    {
+        if (ViewedProject == null)
+            return;
+
+        ActiveUsers = FileManager.ListActiveUsers(ViewedProject);
+        DeleteProjectModal?.Open();
+    }
+
+    private void OpenLeaveProjectModal()
+    {
+        OtherOwnerCount = GetOtherOwnerCount();
+        LeaveProjectModal?.Open();
+    }
+
+    private int GetOtherOwnerCount()
+    {
+        LoadUsersAndRoles();
+        var otherOwnerCount = UsersAndRoles?.Count(u => u.SelectedRole == ProjectRole.Owner) ?? 0;
+        return otherOwnerCount;
+    }
+
+    /// <summary>
+    /// Makes the text input field being checked at every input change
+    /// </summary>
+    private void OnInputChanged(ChangeEventArgs e)
+    {
+        FilterText = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task SortOptionChanged(ChangeEventArgs e)
+    {
+        SortOption = (string?)e.Value ?? "role";
+        await JavaScript.SetCookieAsync("UserSortOption", SortOption, DateTime.UtcNow.AddDays(30));
+    }
+
+    private IEnumerable<UserAndRole> GetSortedUsers()
+    {
+        if (UsersAndRoles == null)
+            return [];
+        
+        var usersAndRoles = UsersAndRoles.Where(u => u.DisplayedName.Contains(FilterText, StringComparison.OrdinalIgnoreCase));
+        return SortOption switch
+        {
+            "role" => usersAndRoles
+                .OrderByDescending(u => u.SelectedRole)
+                .ThenBy(u => u.DisplayedName),
+            "name" or _ => usersAndRoles
+                .OrderBy(u => u.DisplayedName)
+                .ThenByDescending(u => u.SelectedRole),
+        };
+    }
+
+    private IEnumerable<ProjectRole> GetAvailableRoles()
+    {
+        var roles = Enum.GetValues(typeof(ProjectRole)).OfType<ProjectRole>();
+        return Role == ProjectRole.Owner ? roles : roles.Where(r => r < ProjectRole.Manager);
+    }
+}

@@ -1,0 +1,274 @@
+@page "/editor"
+@inject IJSRuntime JavaScript
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+@inject SharedDataService SharedData
+@inject CircuitService Circuit; 
+@implements IAsyncDisposable
+
+    <!-- Check if a file is being viewed -->
+    @if (SharedData.ViewedFile != null) { 
+        <CoCoTitle>@SharedData.ViewedFile.Name</CoCoTitle> 
+
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/editor.css")>
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/compiler.css")>
+   
+    <div id="editor">
+        <div id="@EditorElementId">Loading...</div>
+        <div id="compDiv" style="display:none; border-top: 2px solid var(--line)"> 
+            <div style="padding: 0.75rem; background: var(--background-colored)">
+                <b>Konsolenausgabe:</b>
+                <button type="button" class="icon icon-close float-end" style="color: var(--text); margin: 0.25rem;" aria-label="Close" onclick="closeCompiler()">
+                </button><br/>
+            </div>
+            <div id="compLinesDiv">
+                <div id="compLines"></div>
+            </div>
+            <iframe id="iFrame" sandbox="allow-scripts allow-modals allow-popups" style="display:none"></iframe>
+        </div>
+        <button type="button" id="fab" class="floating-button btn toggle @(IsReadOnly ? "btn-inactive" : "btn-active")" @onclick="ToggleEditMode">
+            <span class="icon"></span>
+            <div class="slash-overlay @(IsReadOnly ? "" : "active")"></div>
+        </button>
+        <div id="lockOverlay"></div>
+    </div>
+
+    } else if (NotFound) {
+        <h1 class="text-danger">Nicht gefunden!</h1>
+    }
+
+    @code {
+
+    private static readonly string[] Colors = 
+    [
+        //MaterialUI 300 colors
+        "#E57373",
+    "#F06292",
+    "#BA68C8",
+    "#9575CD",
+    "#7986CB",
+    "#64B5F6",
+    "#4FC3F7",
+    "#4DD0E1",
+    "#4DB6AC",
+    "#81C784",
+    "#AED581",
+    "#DCE775",
+    "#FFF176",
+    "#FFD54F",
+    "#FFB74D",
+    "#FF8A65",
+    "#A1887F",
+    "#E0E0E0",
+    "#90A4AE"
+    ];
+
+    private FileGroupData? FileGroup = null;
+
+    private bool NotFound = false;
+
+    private const string EditorElementId = "editorContainer"; 
+
+    private string Token = "";
+
+    private bool IsReadOnly = true;
+
+    private int Indent = 0;
+
+    private FileType FileType;
+
+    protected override void OnInitialized() 
+    {
+        NavigationManager.LocationChanged += LocationChanged;
+        Circuit.Disconnected += RemoveSession;
+        SharedData.Changed += SharedDataChanged;
+        FileManager.Events.FileMetadataChanged += HandleMetadataChanged;
+
+        FileEntry? viewedFile = null;
+        if (NavigationManager.TryGetQuery("id", out var idString) && int.TryParse(idString, out var id))
+            viewedFile = Database.Transaction(cp => FileTable.GetById(cp, id));
+
+        if (viewedFile == null)
+        {
+            NotFound = true;
+            SharedData.ViewedFile = null;
+        }
+        else if (!AuthService.HasRole(viewedFile.ProjectId, ProjectRole.Participant))
+        {
+            //viewedFile = null;
+            NotFound = true;
+            SharedData.ViewedFile = null;
+        }
+        else
+        {
+            if (!EditorHub.FileGroups.TryGetValue(viewedFile.Id, out FileGroup))
+            {
+                FileGroup = new(viewedFile);
+                EditorHub.FileGroups[viewedFile.Id] = FileGroup;
+            }
+
+            SharedData.ViewedFile = viewedFile;
+            FileType = FileManager.GetFileType(viewedFile);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (SharedData.ViewedFile == null || FileGroup == null || !firstRender)
+            return;
+
+        string name = AuthService.User.DisplayName;
+        int userId = AuthService.User.Id;
+
+        Token = (AuthService.User.Session??throw new Exception("No session found!")).Token;
+        if (FileGroup.Sessions.TryGetValue(Token, out var session))
+        {
+            session.CircuitIds.Add(Circuit.Id ?? throw new Exception("No circuit ID was found!"));
+        }
+        else
+        {
+            string sessionId;
+            do sessionId = Security.RandomString(12);
+            while (FileGroup.Sessions.Any(x => x.Value.Id == sessionId));
+            string color = PickColor(userId);
+            session = new(sessionId, color, userId, Circuit.Id ?? throw new Exception("No circuit ID was found!"), await JavaScript.InvokeAsync<bool>("isMobileDevice"));
+            FileGroup.Sessions[Token] = session;
+            EditorHub.CallUserListChanged();
+            
+            // get currently set indentation
+            var project = Database.Transaction(cp => ProjectTable.GetById(cp, SharedData.ViewedFile.ProjectId));
+            if (project != null)
+            {
+                Indent = project.Indent;
+            }
+        }
+        
+        //start a SignalR connection -> invokes method in wwwroot/editor.js
+        await JavaScript.InvokeVoidAsync("createConnection");
+
+        await JavaScript.InvokeVoidAsync("setSettings", EditorElementId, userId, session.Id, name, session.Color, 
+            SharedData.ViewedFile.Id, FileManager.GetFileType(SharedData.ViewedFile).ToString(), Indent, AuthService.IsDarkMode);
+
+        //create the editor in the element with EditorElementId -> invokes method in wwwroot/editor.js
+        await JavaScript.InvokeVoidAsync("createEditor", !firstRender);
+
+        var count = 0;
+        // Ensure the editor is enabled
+        while (!await JavaScript.InvokeAsync<bool>("checkYdocLoaded") && count++ < 10)
+            await Task.Delay(200);
+
+        SharedData.OnDocLoaded?.Invoke();
+
+        
+        //set readonly mode if mobile
+        try
+        {
+            if (await JavaScript.InvokeAsync<bool>("isMobileDevice"))
+                await JavaScript.InvokeVoidAsync("setReadOnly", true);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in OnInitializedAsync: {ex.Message}");
+        }
+    }
+
+    private bool HandleMetadataChanged(FileEntry file)
+    {
+        if (SharedData.ViewedFile?.Id != file.Id) return false;
+        var fileType = FileManager.GetFileType(file);
+        //update filetype if necessary
+        if (fileType != FileType)
+            InvokeAsync(() => JavaScript.InvokeVoidAsync("setFileType", fileType.ToString()));
+        FileType = fileType;
+        SharedData.ViewedFile = file;
+        return true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        NavigationManager.LocationChanged -= LocationChanged;
+        Circuit.Disconnected -= RemoveSession;
+        SharedData.Changed -= SharedDataChanged;
+        FileManager.Events.FileMetadataChanged -= HandleMetadataChanged;
+
+        // destroy the editor, yDoc and undoManager -> invokes method in wwwroot/editor.js
+        try
+        {
+            await JavaScript.InvokeVoidAsync("disposeEditor");
+        }
+        catch
+        {
+            //ignored
+        }
+
+        RemoveSession();
+    }
+
+    private void RemoveSession()
+    {
+        if (FileGroup == null)
+            return;
+
+        if (FileGroup.Sessions.TryGetValue(Token, out var session)
+            && session.CircuitIds.Remove(Circuit.Id ?? throw new Exception("No circuit ID was found!")) && session.CircuitIds.Count == 0)
+        {
+            FileGroup.Sessions.Remove(Token, out _);
+
+            if (FileGroup.Sessions.Count == 0)
+            {
+                FileGroup.Persist();
+                if (FileGroup.Sessions.Count == 0)
+                {
+                    // ensure that there are still no sessions because persisting may take long 
+                    EditorHub.FileGroups.Remove(FileGroup.FileId, out _);
+                }
+            }
+            EditorHub.CallUserListChanged();
+        }
+    }
+
+    private string PickColor(int userId)
+    {
+        if (FileGroup == null)
+            return "#000000";
+
+        int index = (userId==int.MinValue ? int.MaxValue : Math.Abs(userId)) % Colors.Length;
+        for (int i = 0; i < Colors.Length; i++)
+        {
+            string color = Colors[(index+i) % Colors.Length];
+            if (FileGroup.Sessions.All(x => x.Value.UserId == userId || x.Value.Color != color))
+                return color;
+        }
+        return Colors[index];
+    }
+
+    private async void LocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        try
+        {
+            if (NavigationManager.Path() != "/editor")
+                return;
+
+            await DisposeAsync();
+            OnInitialized();
+            await OnAfterRenderAsync(true);
+            IsReadOnly = true;
+            StateHasChanged();
+            EditorHub.CallUserListChanged();
+        }
+        catch
+        {
+            //ignored
+        }
+    }
+
+    private async Task ToggleEditMode()
+    {
+        IsReadOnly = !IsReadOnly;
+
+        await JavaScript.InvokeVoidAsync("setReadOnly", IsReadOnly);
+    }
+
+    private void SharedDataChanged()
+        => InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+}

@@ -1,0 +1,98 @@
+.nav-scrollable {
+    width: 20rem;
+    overflow: hidden scroll;
+}
+
+/* for topbar icons */
+.tbi {
+    display: block;
+    flex-shrink: 0;
+    width: 2rem;
+    height: 2rem;
+    margin-left: 0.75rem;
+}
+
+/* avoids double shown icons */
+.tbi::before {
+    content: "";
+}
+
+.top-row .center {
+    flex: 1;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
+    padding: 0 0 0 0.5rem;
+}
+
+/* additional padding removed from class container-fluid to avoid white bars beneath top-bar*/
+.container-fluid {
+    padding: 0;
+}
+
+.top-row {
+    background-color: var(--background-colored);
+    border-bottom: 2px solid var(--line);
+    justify-content: flex-end;
+    height: 3.5rem;
+    width: 100%; /* necessary for fixed position */
+    display: flex;
+    overflow: hidden;
+    align-items: center;
+    position: sticky;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    top: 0;
+    z-index: 951;
+}
+
+.responsive-icon {
+    display: inline-block;
+    height: 2.5rem;
+    width: 10rem;
+    margin-left: 0.25rem;
+    margin-top: 0.125rem;
+}
+
+.logo {
+    display: inline-block;
+    height: 2.375rem;
+    width: 2.375rem;
+    margin-top: -0.25rem;
+}
+
+.modal-body > div {
+    margin-bottom: 1.0rem;
+}
+
+.sort-margin {
+    margin-left: 10px;
+}
+
+@media (max-width: 640.98px) {
+    .top-row {
+        justify-content: space-between;
+    }
+
+    .responsive-icon {
+        display: none;
+    }
+
+    .button-text {
+        display: none;
+    }
+}
+
+@media (max-width: 400px) {
+    .d-flex input::placeholder {
+        font-size: 0.7rem;
+    }
+}
+
+@media (orientation: portrait) and (pointer: coarse),
+       (orientation: landscape) and (pointer: coarse) {
+    button.floating-button {
+        display: flex;
+    }
+}

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8" />
+    <style>
+    </style>
+</head>
+<body>
+<div id="compLines" class="compLines"></div>
+<!--SCRIPT_DELIMITER-->
+<script>
+    //returns an array of serialized arguments
+    function getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args){
+
+        var serializedArray = [];
+        args.forEach(arg => serializedArray.push(serialize_afawkbfjzlsuvhwkefjbalefwhauf(arg)));
+        return serializedArray;
+    }
+    /*
+     * Every item is serialized as { type: string, data: string } except for objects which are serialized as 
+     * { type: string, header: string, contents }. Arrays and Sets are serialized recursively.
+     */
+    function serialize_afawkbfjzlsuvhwkefjbalefwhauf(arg) {
+
+        //serialize as simple strings
+        if (typeof (arg) === "string" ||
+            typeof (arg) === "number" ||
+            typeof (arg) === "boolean" ||
+            arg instanceof RegExp ||
+            arg instanceof Date ||
+            arg instanceof Boolean ||
+            arg instanceof Number ||
+            arg instanceof String ||
+            arg instanceof Error)
+            return {type: "string", data: "" + arg};
+        //serialize as string + 'n'
+        else if (typeof (arg) === "bigint" || arg instanceof BigInt)
+            return {type: "string", data: arg + 'n'};
+        //handle functions
+        else if (typeof (arg) === "function") 
+            return {type: "CoCoDiNgfunction", data: `function ${arg.name || "(anonymous)"}`};
+        //serialize recursively
+        else if (Array.isArray(arg) || arg instanceof Set) {
+            const array = [];
+            var type;
+            var length;
+            if (Array.isArray(arg)) {
+                type = "array";
+                length = arg.length;
+            } else {
+                type = "set";
+                length = arg.size;
+            }
+            if (Array.isArray(arg) && arg.filter(item => item !== undefined).length !== length) {
+                for (var index = 0; index < length; index++) {
+                    array.push(serialize_afawkbfjzlsuvhwkefjbalefwhauf(arg[index]));
+                }
+            } else {
+                arg.forEach((item) => {
+                    array.push(serialize_afawkbfjzlsuvhwkefjbalefwhauf(item));
+                });
+            }
+            return {type: type, data: array};
+            // serialize objects
+        } else {
+            try {
+                var obj;
+                var type;
+                var header;
+                var contents;
+                if (arg instanceof Map) {
+                    type = "CoCoDiNgmap";
+                    obj = Object.fromEntries(arg);
+                } else {
+                    type = "CoCoDiNgobject"
+                    obj = arg;
+                }
+                header = arg.constructor.name;
+                if (header === undefined)
+                    header = arg.toString();
+                contents = JSON.stringify(obj, null, 2);
+                return {type: type, header: header, contents: contents};
+            } catch {
+                return {type: "unknown", data: JSON.stringify(arg)};
+            }
+        }
+    }
+    //OVERWRITING CONSOLE FUNCTIONS [BEGIN]
+    console.log = function(...args){
+        window.parent.postMessage({type: "log", style: "", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args)}, '*');
+    }
+    console.debug = function(...args){
+        window.parent.postMessage({type: "log", style: "debug", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args)}, '*');
+    }
+    console.warn = function(...args){
+        window.parent.postMessage({type: "log", style: "warn", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args)}, '*');
+    }
+    console.error = function(...args){
+        window.parent.postMessage({type: "log", style: "error", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args)}, '*');
+    }
+    console.info = function (...args) {
+        window.parent.postMessage({type: "log", style: "info", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args)}, '*');
+    }
+    console.group = function(name){
+        window.parent.postMessage({type: "setGroup", name: name, collapsed: false}, '*');
+    }
+    console.groupCollapsed = function(name){
+        window.parent.postMessage({type: "setGroup", name: name, collapsed: true}, '*');
+    }
+    console.groupEnd = function(){
+        window.parent.postMessage({type: "endGroup"}, '*');
+    }
+    console.dir = function(...args){
+        window.parent.postMessage({type: "log", style: '', args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args), mode: 'dir'}, '*');
+    }
+    console.dirxml = function(...args){
+        window.parent.postMessage({type: "log", style: 'warn', args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf('console.dirxml() not supported')}, '*');
+    }
+
+    console.assert = function(condition, ...args) {
+        if (!condition) {
+            window.parent.postMessage({type: "log", style: "assert", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args)}, '*');
+        }
+    }
+    console.clear = function() {
+        window.parent.postMessage({type: 'clearConsole'}, '*');
+        window.parent.postMessage({type: "log", style: "", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf("Konsole geleert.")}, '*');
+    }
+    console.empty = function () {
+        window.parent.postMessage({ type: 'clearConsole' }, '*');
+    }
+    console.count = function(label = "default") {
+        if (!window.consoleCountMap) window.consoleCountMap = {};
+        if (!window.consoleCountMap[label]) {
+            window.consoleCountMap[label] = 0;
+        }
+        window.consoleCountMap[label]++;
+        window.parent.postMessage({type: "log", style: "count", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`${label}: ${window.consoleCountMap[label]}`)}, '*');
+        
+    }
+    console.countReset = function(label = "default") {
+        if (window.consoleCountMap && window.consoleCountMap[label] !== undefined) {
+            window.consoleCountMap[label] = 0;
+            window.parent.postMessage({type: "log", style: "resetCount", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`${label}: Z\u00e4hler zur\u00fcckgesetzt.`)}, '*');
+        } else {
+            window.parent.postMessage({type: "log", style: "resetCount", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`${label}: Z\u00e4hler nicht gefunden.`)}, '*');
+        }
+    }
+    console.table = function(...args) {
+        if (args.length === 0)
+            return;
+        if (!Array.isArray(args[0])) {
+            console.dir(...args);
+            return;
+        }
+        window.parent.postMessage({type: "table", style: "", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(...args)}, '*');
+    };
+
+    console.time = function (label) {
+        if (!window.consoleTimeMap) window.consoleTimeMap = {};
+        window.consoleTimeMap[label] = Date.now();
+        window.parent.postMessage({type: "log", style: "time", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`Timer f\u00fcr ${label} gestartet.`)}, '*');
+        
+    }
+
+    console.timeEnd = function(label) {
+        if (window.consoleTimeMap && window.consoleTimeMap[label]) {
+            const elapsed = Date.now() - window.consoleTimeMap[label];
+            window.parent.postMessage({type: "log", style: "timeEnd", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`Timer f\u00fcr ${label} beendet bei: ${elapsed}ms`)}, '*');
+            delete window.consoleTimeMap[label];
+        } else {
+            window.parent.postMessage({type: "log", style: "timeEnd", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`Timer f\u00fcr ${label} nicht gefunden.`)}, '*');
+        }
+    }
+    console.timeLog = function(label) {
+        if (window.consoleTimeMap && window.consoleTimeMap[label]) {
+            const elapsed = Date.now() - window.consoleTimeMap[label];
+            window.parent.postMessage({type: "log", style: "timeLog", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`Timer f\u00fcr ${label}: ${elapsed}ms`)}, '*');
+        } else {
+            window.parent.postMessage({type: "log", style: "time", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`Timer f\u00fcr ${label} nicht gefunden.`)}, '*');
+        }
+    }
+    console.timeStamp = function(label) {
+        window.parent.postMessage({type: "log", style: "timeStamp", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(`Zeitstempel f\u00fcr ${label}: ${new Date().toISOString()}`)}, '*');
+    }
+    console.trace = function(...args) {
+        window.parent.postMessage({type: "log", style: "trace", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf("Trace:", ...args)}, '*');
+        console.error(new Error().stack);
+    }
+    console.cocoding = function(...args){
+        const cocoding =
+            " #####     ######      #####     ######     #####      #    ##   #     #####   \n" +
+            "#         #      #    #         #      #    #     #    #    # #  #    #        \n" +
+            "#         #      #    #         #      #    #     #    #    #  # #    #   ##   \n" +
+            "#         #      #    #         #      #    #     #    #    #   ##    #    #   \n" +
+            " #####     ######      #####     ######     #####      #    #    #     #####   \n"
+        ;
+        window.parent.postMessage({type: "log", style: "cocoding", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(cocoding)}, '*');
+    }
+
+    //OVERWRITING CONSOLE FUNCTIONS [END]
+
+    try {
+        //DELIMITER
+    } catch(error){
+        window.parent.postMessage({type: "log", style: "error", args: getSerializedArgs_asdflkdsafaofijasdsdfadsflkjoaiweasldvknaf(error.message)}, '*');
+    }
+</script>
+</body>
+</html>
+

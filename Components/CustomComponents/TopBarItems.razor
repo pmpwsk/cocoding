@@ -1,0 +1,130 @@
+﻿@using System.Web
+@implements IDisposable
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JavaScript
+@inject SharedDataService SharedData
+
+<div class="container-fluid top-row">
+    <div class="col-auto">
+        <a href="/"><img src="/cocoding_icon.svg" class="logo" alt="icon"><img src="/cocoding_text.svg" class="responsive-icon" alt="cocoding"></a> <!-- class responsive-icon for removing lettering at small screens -->
+    </div>
+    <div class="center">
+        @if (SharedData.ViewedFile != null) {
+            @switch (NavigationManager.Path())
+            {
+                case "/editor":
+                    @(SharedData.ViewedFile.Name)
+                    break;
+                case "/versions":
+                    @(SharedData.ViewedFile.Name + " (Versionen)")
+                    break;
+            }
+        }
+    </div>
+
+    @if (NavigationManager.Path() == "/editor" && SharedData.ViewedFile != null && (SharedData.ViewedFile.Name.EndsWith(".js") || SharedData.ViewedFile.Name.EndsWith(".py"))) {
+        <a class="tbi icon icon-play" onclick="compile()" href="javascript:" title="Shortcut: Strg+Umschalt+F10"></a>
+    }
+
+    @if (IsLoaded) {
+        @if (AuthService.LoggedIn) {
+            <a class="tbi icon icon-list" href="javascript:" @onclick="() => UserMenuOpen = !UserMenuOpen"></a>
+        } else {
+            @if(IsLogin) {
+                <a href="javascript:" @onclick="GoToRegister">Registrieren</a>
+            } else {
+                <a href="javascript:" @onclick="GoToLogin">Anmelden</a>
+            }
+        }
+    }
+</div>
+
+@if(IsLoaded && AuthService.LoggedIn) {
+    <div class="menu right keep-top @(UserMenuOpen ? "visible" : "hidden")" @onclick="() => UserMenuOpen = false">
+        <div>
+            @if(AuthService.IsAdmin) {
+                <a href="/admin">Administration</a>
+            }
+            <a href="/user?id=@AuthService.User.Id">Konto</a>
+            <a href="javascript:" @onclick="Logout">Abmelden</a>
+            @if (NavigationManager.Path() == "/editor" && SharedData.ViewedFile != null) {
+                <a class="mobile-only" href="javascript:" @onclick="ToggleMobileSidebarShown">@(SharedData.MobileSidebarShown ? "Seitenleiste verstecken" : "Seitenleiste anzeigen")</a>
+                <a href="javascript:" onclick="openSearch()">Suchpanel öffnen</a>
+            }
+            <a href="/info">Informationen</a>
+        </div>
+    </div>
+}
+
+@code {
+    private bool UserMenuOpen = false;
+    
+    private bool IsLoaded = false;
+    
+    private bool IsLogin = false;
+
+    protected override void OnInitialized()
+    {
+        AuthService.Reloaded += OnAuthReloaded;
+        NavigationManager.LocationChanged += LocationChanged;
+        SharedData.Changed += SharedDataChanged;
+        IsLogin = NavigationManager.Path() == "/login";
+        IsLoaded = true;
+    }
+
+    private void LocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (NavigationManager.Path() != "/editor" && NavigationManager.Path() != "/versions")
+            SharedData.ViewedFile = null;
+        UserMenuOpen = false;
+        StateHasChanged();
+    }
+
+    private void OnAuthReloaded()
+    {
+        StateHasChanged();
+    }
+
+    private void SharedDataChanged()
+        => InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+
+    private async Task Logout()
+    {
+        await JavaScript.InvokeVoidAsync("disposeConnection");
+        await AuthService.Logout();
+        IsLogin = true;
+    }
+
+    private void GoTo(string path)
+    {
+        string query = NavigationManager.TryGetQuery("r", out var redirect) ? "?r=" + HttpUtility.UrlEncode(redirect) : "";
+        NavigationManager.NavigateTo(path + query);
+    }
+
+    private void GoToLogin()
+    {
+        GoTo("/login");
+        IsLogin = true;
+    }
+
+    private void GoToRegister()
+    {
+        GoTo("/register");
+        IsLogin = false;
+    }
+
+    private async Task ToggleMobileSidebarShown()
+    {
+        SharedData.MobileSidebarShown = !SharedData.MobileSidebarShown;
+        await JavaScript.SetCookieAsync("MobileSidebarShown", SharedData.MobileSidebarShown.ToString(), DateTime.UtcNow.AddDays(30));
+        UserMenuOpen = false;
+    }
+
+    public void Dispose()
+    {
+        AuthService.Reloaded -= OnAuthReloaded;
+        NavigationManager.LocationChanged -= LocationChanged;
+        SharedData.Changed -= SharedDataChanged;
+    }
+}

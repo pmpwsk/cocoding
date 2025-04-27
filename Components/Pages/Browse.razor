@@ -1,0 +1,440 @@
+﻿@page "/browse"
+@implements IDisposable
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+
+
+@if ((ViewedProject != null || ViewedFolder != null) && FilesAndUsers != null && Folders != null) {
+    @if (ViewedProject != null) {
+        <CoCoTitleH>@ViewedProject.Name</CoCoTitleH>
+    }
+    @if (ViewedFolder != null) {
+        <CoCoTitleH>@ViewedFolder.Name</CoCoTitleH>
+    }
+
+    <a class="btn btn-primary ibtn mb-3" href="@(ViewedFolder == null ? "/" : (ViewedFolder.ParentId == null ? $"/browse?pid={ViewedFolder.ProjectId}" : $"/browse?fid={ViewedFolder.ParentId}"))">
+        <span class="icon icon-arrow-left-circle"></span>
+        <span>Zurück</span>
+    </a>
+    <button class="btn btn-primary ibtn mb-3" @onclick="OpenFolderCreationModal">
+        <span class="icon icon-folder-plus"></span>
+        <span>Neuer Ordner</span>
+    </button>
+    <button class="btn btn-primary ibtn mb-3" @onclick="OpenFileCreationModal">
+        <span class="icon icon-file-earmark-plus"></span>
+        <span>Neue Datei</span>
+    </button>
+
+    <Modal @ref="@FolderCreationModal" Title="Ordner erstellen">
+        <form @onsubmit="CreateFolder">
+            <div class="form-group mb-3">
+                <label for="new-folder-name">Name:</label>
+                <input class="form-control" type="text" id="new-folder-name" placeholder="Namen eingeben..." @bind-value="@NewName"/>
+            </div>
+            @if (CreationErrorMessage != null) {
+                <p class="text-danger mb-3">@CreationErrorMessage</p>
+            }
+            <button class="btn btn-primary" type="submit">Erstellen</button>
+        </form>
+    </Modal>
+
+    <Modal @ref="@FileCreationModal" Title="Datei erstellen">
+        <form @onsubmit="CreateFile">
+            <div class="form-group mb-3">
+                <label for="new-file-name">Name:</label>
+                <input class="form-control" type="text" id="new-file-name" placeholder="Namen eingeben..." @bind-value="@NewName"/>
+            </div>
+            @if (CreationErrorMessage != null) {
+                <p class="text-danger mb-3">@CreationErrorMessage</p>
+            }
+            <button class="btn btn-primary" type="submit">Erstellen</button>
+        </form>
+    </Modal>
+
+    @foreach (var folder in Folders.OrderBy(x => x.Name)) {
+        <div class="list-item folder">
+            <div>
+                <div class="name">
+                    <a href="/browse?fid=@(folder.Id)" class="opener ibtn">
+                        <span class="icon icon-folder"></span>
+                        <span>@folder.Name</span>
+                    </a>
+                </div>
+            </div>
+            <a class="sq icon icon-gear" href="javascript:" @onclick="() => OpenFolderModal(folder)"></a>
+        </div>
+    }
+
+    <Modal @ref="@FolderModal" Title=@($"Ordner bearbeiten: {SelectedFolder?.Name}")>
+        @if (DeletionRequested) {
+            <!-- Shows an extra warning if there are files being used in the folder and lists the active users -->
+            @if (ActiveUsers.Count > 0) {
+                <p class="danger">Achtung: In diesem Ordner ist gerade mindestens eine Datei in Bearbeitung im Editor! Bitte stellen Sie sicher, dass dieser Ordner tatsächlich gelöscht werden kann!</p>
+                <div>
+                    <u>Aktive Nutzer:</u>
+                    <ActiveUserList Users="@ActiveUsers"/>
+                </div>
+                <button class="btn btn-danger mt-1 me-2" @onclick="() => ActiveUsers = []">Trotz Bearbeitung Ordner löschen</button>
+            } else {
+                <p class="danger">Wirklich löschen? Alle Dateien gehen unwiderruflich verloren.</p>
+                <button class="btn btn-danger mt-1 me-2" @onclick="DeleteFolder">Ja, Ordner dauerhaft löschen</button>
+            }
+            <button class="btn btn-primary mt-1" @onclick="() => DeletionRequested = false">Abbrechen</button>
+        } else {
+            <form @onsubmit="RenameFolder">
+                <div class="form-group mb-3">
+                    <label for="folder-name">Name:</label>
+                    <input class="form-control" type="text" id="folder-name" placeholder="Namen eingeben..." @bind-value="@RenameName"/>
+                </div>
+                @if (RenameErrorMessage != null) {
+                    <p class="text-danger mb-3">@RenameErrorMessage</p>
+                }
+                <button class="btn btn-primary" type="submit">Umbenennen</button>
+            </form>
+            <button class="btn btn-danger mt-4" @onclick="OpenDeletionModal">Löschen</button>
+        }
+    </Modal>
+
+    @foreach (var fu in FilesAndUsers.OrderBy(x => x.File.Name)) {
+        <div class="list-item file">
+            <div>
+                <div class="name">
+                    <a href="/editor?id=@(fu.File.Id)" class="opener ibtn">
+                        <span class="icon icon-file-earmark"></span>
+                        <span>@fu.File.Name</span>
+                    </a>
+                </div>
+                <div class="collapse" id="collapse-@fu.File.Id">
+                    <small>
+                        <div class="details">
+                            <u>Zuletzt geändert:</u><br/>
+                            @AuthService.LocalTimeString(fu.File.Changed)<br/>
+                            <u>Letzter Nutzer:</u><br/>
+                            @if (fu.User != null) {
+                                <a href="/user?id=@fu.User.Id">@fu.User.DisplayName</a>
+                            } else {
+                                <span>Gelöschter Nutzer</span>
+                            }
+                        </div>
+                    </small>
+                </div>
+            </div>
+            <a class="sq icon icon-gear" href="javascript:" @onclick="() => OpenFileModal(fu)"></a>
+            <a class="sq icon toggle" data-bs-toggle="collapse" href="#collapse-@fu.File.Id" aria-expanded="false" aria-controls="collapse-@fu.File.Id"></a>
+        </div>
+    }
+
+    <Modal @ref="@FileModal" Title=@($"Datei bearbeiten: {SelectedFile?.File.Name}")>
+        @if (DeletionRequested) {
+            <!-- Shows an extra warning if the file is being used and lists the active users -->
+            @if (ActiveUsers.Count > 0) {
+                <p class="danger">Achtung: Diese Datei ist gerade in Bearbeitung im Editor! Bitte stellen Sie sicher, dass diese Datei tatsächlich gelöscht werden kann!</p>
+                <div>
+                    <u>Aktive Nutzer:</u>
+                    <ActiveUserList Users="@ActiveUsers"/>
+                </div>
+                <button class="btn btn-danger mt-1 me-2" @onclick="() => ActiveUsers = []">Trotz Bearbeitung Datei löschen</button>
+            } else {
+                <p class="danger">Wirklich löschen? Die Datei geht unwiderruflich verloren.</p>
+                <button class="btn btn-danger mt-1 me-2" @onclick="DeleteFile">Ja, Datei dauerhaft löschen</button>
+            }        
+            <button class="btn btn-primary mt-1" @onclick="() => DeletionRequested = false">Abbrechen</button>
+        } else {
+            <form @onsubmit="RenameFile">
+                <div class="form-group mb-3">
+                    <label for="file-name">Name:</label>
+                    <input class="form-control" type="text" id="file-name" placeholder="Namen eingeben..." @bind-value="@RenameName"/>
+                </div>
+                @if (RenameErrorMessage != null) {
+                    <p class="text-danger mb-3">@RenameErrorMessage</p>
+                }
+                <button class="btn btn-primary" type="submit">Umbenennen</button>
+            </form>
+            <button class="btn btn-danger mt-4" @onclick="OpenDeletionModal">Datei löschen</button>
+        }
+    </Modal>
+} else if (NotFound) {
+    <h1 class="text-danger">Nicht gefunden!</h1>
+}
+
+
+@code {
+    private Modal? FolderCreationModal = null;
+
+    private Modal? FileCreationModal = null;
+
+    private string? CreationErrorMessage = null;
+
+    private ProjectEntry? ViewedProject = null;
+    private FolderEntry? ViewedFolder = null;
+
+    private bool NotFound = false;
+
+    private Modal? FolderModal;
+    private FolderEntry? SelectedFolder = null;
+
+    private Modal? FileModal;
+    private FileAndUser? SelectedFile = null;
+
+    private string RenameName = "";
+    private string? RenameErrorMessage = null;
+
+    private bool DeletionRequested = false;
+
+    private List<FileAndUser>? FilesAndUsers = null;
+
+    private List<FolderEntry>? Folders = null;
+
+    private string NewName = "";
+
+    private List<UserEntry> ActiveUsers = [];
+
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += LocationChanged;
+        Load();
+    }
+
+    void IDisposable.Dispose()
+    {
+        NavigationManager.LocationChanged -= LocationChanged;
+    }
+
+    private void LocationChanged(object? sender, LocationChangedEventArgs e)
+        => Load();
+
+    private void Load()
+    {
+        ViewedProject = null;
+        ViewedFolder = null;
+        FolderCreationModal?.Close();
+        FileCreationModal?.Close();
+        if (NavigationManager.Path() != "/browse")
+            return;
+        if (NavigationManager.TryGetQuery("pid", out var pidString)
+            && int.TryParse(pidString, out var projectId))
+        {
+            ViewedProject = Database.Transaction(cp => ProjectTable.GetById(cp, projectId));
+
+            if (ViewedProject != null)
+            {
+                if (!AuthService.HasRole(ViewedProject.Id, ProjectRole.Participant))
+                {
+                    ViewedProject = null;
+                    NotFound = true;
+                    StateHasChanged();
+                    return;
+                }
+                LoadContents(cp => FileTable.ListByProjectRoot(cp, projectId), cp => FolderTable.ListByProjectRoot(cp, projectId));
+            }
+        }
+        else if (NavigationManager.TryGetQuery("fid", out var fidString)
+                 && int.TryParse(fidString, out var folderId))
+        {
+            ViewedFolder = Database.Transaction(cp => FolderTable.GetById(cp, folderId));
+
+            if (ViewedFolder != null)
+            {
+                if (!AuthService.HasRole(ViewedFolder.ProjectId, ProjectRole.Participant))
+                {
+                    ViewedFolder = null;
+                    NotFound = true;
+                    StateHasChanged();
+                    return;
+                }
+                LoadContents(cp => FileTable.ListByFolder(cp, folderId), cp => FolderTable.ListByFolder(cp, folderId));
+            }
+        }
+
+        if ((ViewedProject == null && ViewedFolder == null) || FilesAndUsers == null || Folders == null)
+            NotFound = true;
+
+        StateHasChanged();
+    }
+
+    private void LoadContents(Func<CommandProvider, List<FileEntry>> fileLoader, Func<CommandProvider, List<FolderEntry>> folderLoader)
+    {
+        FilesAndUsers = [];
+        Dictionary<int, UserEntry?> knownUsers = [];
+        Database.Transaction(cp =>
+        {
+            var files = fileLoader.Invoke(cp);
+            Folders = folderLoader.Invoke(cp);
+            foreach (var file in files)
+            {
+                if (!knownUsers.TryGetValue(file.UserId, out var user))
+                    knownUsers[file.UserId] = user = UserTable.GetById(cp, file.UserId);
+                FilesAndUsers.Add(new(file, user));
+            }
+        });
+    }
+
+    private void OpenFolderCreationModal()
+    {
+        CreationErrorMessage = null;
+        NewName = "";
+        FolderCreationModal?.Open();
+    }
+
+    private void OpenFileCreationModal()
+    {
+        CreationErrorMessage = null;
+        NewName = "";
+        FileCreationModal?.Open();
+    }
+
+    private void CreateFile()
+    {
+        try
+        {
+            CreationErrorMessage = null;
+
+            FileEntry file;
+            if (ViewedProject != null)
+                file = FileManager.CreateFile(ViewedProject.Id, null, NewName, AuthService.User.Id);
+            else if (ViewedFolder != null)
+                file = FileManager.CreateFile(ViewedFolder.ProjectId, ViewedFolder.Id, NewName, AuthService.User.Id);
+            else return;
+
+            FileManager.Events.ReportFileCreated(file);
+
+            NavigationManager.NavigateTo($"/editor?id={file.Id}");
+        }
+        catch (Exception ex)
+        {
+            CreationErrorMessage = ex.Message;
+        }
+    }
+
+    private void CreateFolder()
+    {
+        try
+        {
+            CreationErrorMessage = null;
+
+            FolderEntry folder;
+            if (ViewedProject != null)
+                folder = FileManager.CreateFolder(ViewedProject.Id, null, NewName);
+            else if (ViewedFolder != null)
+                folder = FileManager.CreateFolder(ViewedFolder.ProjectId, ViewedFolder.Id, NewName);
+            else return;
+
+            FileManager.Events.ReportFolderCreated(folder);
+
+            NavigationManager.NavigateTo($"/browse?fid={folder.Id}");
+        }
+        catch (Exception ex)
+        {
+            CreationErrorMessage = ex.Message;
+        }
+    }
+
+    private void OpenFolderModal(FolderEntry folder)
+    {
+        DeletionRequested = false;
+        RenameErrorMessage = null;
+        SelectedFolder = folder;
+        RenameName = folder.Name;
+        FolderModal?.Open();
+    }
+
+    private void RenameFolder()
+    {
+        if (SelectedFolder == null)
+            return;
+
+        try
+        {
+            RenameErrorMessage = null;
+            if (FileManager.RenameFolder(SelectedFolder, RenameName))
+            {
+                SelectedFolder.Name = RenameName;
+                FileManager.Events.ReportFolderMetadataChanged(SelectedFolder);
+                SelectedFolder = null;
+
+                FolderModal?.Close();
+            }
+        }
+        catch (Exception ex)
+        {
+            RenameErrorMessage = ex.Message;
+        }
+    }
+
+    private void DeleteFolder()
+    {
+        if (SelectedFolder == null)
+            return;
+
+        ProjectManager.DeleteFolder(SelectedFolder.Id);
+        Folders?.Remove(SelectedFolder);
+        FileManager.Events.ReportFolderDeleted(SelectedFolder);
+        SelectedFolder = null;
+
+        FolderModal?.Close();
+    }
+
+    private void OpenFileModal(FileAndUser fu)
+    {
+        DeletionRequested = false;
+        RenameErrorMessage = null;
+        SelectedFile = fu;
+        RenameName = fu.File.Name;
+        FileModal?.Open();
+    }
+
+    private void RenameFile()
+    {
+        if (SelectedFile == null)
+            return;
+
+        try
+        {
+            RenameErrorMessage = null;
+            if (FileManager.RenameFile(SelectedFile.File, RenameName))
+            {
+                SelectedFile.File.Name = RenameName;
+                FileManager.Events.ReportFileMetadataChanged(SelectedFile.File);
+                SelectedFile = null;
+
+                FileModal?.Close();
+            }
+        }
+        catch (Exception ex)
+        {
+            RenameErrorMessage = ex.Message;
+        }
+    }
+
+    private void DeleteFile()
+    {
+        if (SelectedFile == null)
+            return;
+
+        ProjectManager.DeleteFile(SelectedFile.File.Id);
+        FilesAndUsers?.Remove(SelectedFile);
+        FileManager.Events.ReportFileDeleted(SelectedFile.File);
+        SelectedFile = null;
+
+        FileModal?.Close();
+    }
+
+    /// <summary>
+    /// Checks if files are being edited and sets DeletionRequested to true
+    /// </summary>
+    private void OpenDeletionModal()
+    {
+        if (SelectedFolder != null)
+            ActiveUsers = FileManager.ListActiveUsers(SelectedFolder);
+        else if (SelectedFile != null)
+            ActiveUsers = FileManager.ListActiveUsers(SelectedFile.File);
+        DeletionRequested = true;
+    }
+
+    private class FileAndUser(FileEntry file, UserEntry? user)
+    {
+        public FileEntry File = file;
+
+        public UserEntry? User = user;
+    }
+}

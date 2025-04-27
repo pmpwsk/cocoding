@@ -1,0 +1,119 @@
+.tab.users {
+    overflow: hidden auto;
+}
+
+.tab .user {
+    margin: 0.5rem 0.1rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.tab .user > .user-info {
+    display: flex;
+    align-items: center;
+}
+
+.tab .user-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tab .user .status {
+    width: 0.9rem;
+    height: 0.9rem;
+    margin: 0.1rem 0.3rem 0.1rem 0.1rem;
+}
+
+.tab .user .status.offline {
+    width: 1.1rem;
+    height: 1.1rem;
+    margin: 0 0.2rem 0 0;
+}
+
+.tab .user:has(.status.offline) {
+    opacity: 0.5;
+}
+
+.tab .user .status.hidden {
+    display: none;
+}
+
+.tab .user .name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    margin-top: 0.1rem;
+}
+
+.tab .user .icon-phone-fill {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    margin-left: 0.2rem;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.tab .user .icon-phone-fill:not(.hidden) {
+    margin-left: 0;
+    margin-right: 0.3rem;
+    order: -1;
+}
+
+.tab .user .icon-phone-fill {
+    background-color: transparent;
+}
+
+.tab .filestatus {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    font-weight: normal;
+    line-height: 1.1rem;
+    margin-left: 0.9rem;
+    margin-top: 0.2rem;
+    margin-right: 0.2rem;
+    vertical-align: middle;
+    width: calc(100%-1.1rem);
+}
+
+.tab .filestatus .icon-file-earmark, 
+.tab .filestatus .icon-list-ol {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    margin-left:0.3rem;
+    margin-right: 0.1rem;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+
+.tab .filestatus .filename {
+    white-space: nowrap;
+    vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 0.2rem;
+    min-width: 0;
+}
+
+.tab .filestatus .line-number {
+    margin-left: 0.1rem;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.tab .filestatus.hidden {
+    display: none;
+}
+
+.tab .icon-list-ol.hidden {
+    display: none;
+}
+
+.tab .icon-phone-fill.hidden {
+    display: none;
+}

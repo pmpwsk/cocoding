@@ -1,0 +1,36 @@
+{
+  "name": "npmjs",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "buildCodemirror": "webpack ./src/codemirror.js --output-path ../wwwroot/js --output-filename codemirror.bundle.js",
+    "buildSignalr": "webpack ./src/signalr.js --output-path ../wwwroot/js --output-filename signalr.bundle.js",
+    "buildCompile": "webpack ./src/compile.js --output-path ../wwwroot/js --output-filename compile.bundle.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "webpack": "^5.97.1",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.26.7",
+    "@codemirror/commands": "github:codemirror/commands",
+    "@codemirror/lang-css": "github:codemirror/lang-css",
+    "@codemirror/lang-html": "github:codemirror/lang-html",
+    "@codemirror/lang-javascript": "github:codemirror/lang-javascript",
+    "@codemirror/lang-python": "github:codemirror/lang-python",
+    "@codemirror/theme-one-dark": "github:codemirror/theme-one-dark",
+    "@microsoft/signalr": "^8.0.7",
+    "@microsoft/signalr-protocol-msgpack": "^8.0.7",
+    "@uiw/codemirror-theme-duotone": "^4.23.8",
+    "codemirror": "^6.0.1",
+    "sprintf-js": "^1.1.3",
+    "vm-browserify": "^1.1.2",
+    "y-codemirror.next": "^0.3.5",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.23"
+  }
+}

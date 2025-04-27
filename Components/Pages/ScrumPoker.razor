@@ -1,0 +1,201 @@
+@page "/scrum-poker"
+@using System.Collections.Concurrent
+@using System.Collections.ObjectModel
+@implements IAsyncDisposable
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+@inject CircuitService Circuit;
+
+<CoCoTitleH>Scrum Poker</CoCoTitleH>
+
+@if (SessionId != null) {
+    <div class="form-group mb-3">
+        <label for="explanation">Begründung:</label>
+        <input class="form-control" type="text" id="explanation" placeholder="Begründung eingeben..." style="@GetExplanationColorStyle()" @bind-value="@Explanation">
+    </div>
+    <div class="form-group mb-4">
+        <label for="explanation">Bewertung:</label>
+        <div>
+            @foreach (var points in PointsOptions) {
+                <button class="btn btn-primary" style="margin: 0 0.1rem 0.1rem 0; padding: 0.1rem 0.5rem 0.1rem 0.5rem; @GetPointsColorStyle(points)" @onclick="async () => await Vote(points)">@points</button>
+            }
+        </div>
+    </div>
+    if (Sessions[SessionId].Revealed) {
+        @foreach (var participant in Sessions[SessionId].Participants.Values.OrderBy(x => x.Name)) {
+            <p>@participant.Name - @(participant.Decision == null ? "Keine Bewertung" : (participant.Decision.Points + (participant.Decision.Explanation==null?"":$" ({participant.Decision.Explanation})")))</p>
+        }
+        <button class="btn btn-primary" @onclick="Reset">Zurücksetzen</button>
+    } else {
+        @foreach (var participant in Sessions[SessionId].Participants.Values.OrderBy(x => x.Name)) {
+            <p>@participant.Name - @(participant.Decision == null ? "Keine Bewertung" : "[???]")</p>
+        }
+        <button class="btn btn-primary" @onclick="Reveal">Aufdecken</button>
+    }
+}
+
+@code {
+    private static readonly ReadOnlyCollection<double> PointsOptions = new([0, 0.5, 1, 2, 3, 5, 8, 13, 20, 40, 100]);
+
+    private const string GreenColor = "#a0f2a0";
+
+    private const string RedColor = "#f2a0a0";
+
+    private static readonly ConcurrentDictionary<string, Session> Sessions = [];
+
+    private class Session
+    {
+        public bool Revealed = false;
+        
+        public DateTime LastReveal = DateTime.MinValue;
+
+        public readonly ConcurrentDictionary<int, Participant> Participants = [];
+
+        public async Task UpdateAll(bool clear = false)
+        {
+            foreach (var participant in Participants.Values)
+                foreach (var instance in participant.Instances)
+                {
+                    if (clear)
+                        instance.Explanation = "";
+                    await instance.InvokeAsync(instance.StateHasChanged);
+                }
+        }
+    }
+
+    private class Participant(ScrumPoker instance)
+    {
+        public readonly string Name = instance.AuthService.User.DisplayName;
+        
+        public readonly List<ScrumPoker> Instances = [instance];
+
+        public Decision? Decision = null;
+    }
+
+    private class Decision(double points, string? explanation)
+    {
+        public readonly double Points = points;
+
+        public readonly string? Explanation = explanation;
+    }
+
+    private string? SessionId = null;
+
+    private string Explanation = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Join();
+        Circuit.Connected += CircuitConnected;
+        Circuit.Disconnected += CircuitDisconnected;
+    }
+    
+    private async Task Join()
+    {
+        if (NavigationManager.Path() != "/scrum-poker")
+            return;
+        
+        if (NavigationManager.TryGetQuery("s", out var sessionId))
+        {
+            SessionId = sessionId;
+        }
+        else
+        {
+            do SessionId = Security.RandomString(16);
+            while (Sessions.ContainsKey(SessionId));
+            NavigationManager.NavigateTo("/scrum-poker?s=" + SessionId, replace: true);
+        }
+
+        if (!Sessions.TryGetValue(SessionId, out var session))
+        {
+            session = new();
+            Sessions[SessionId] = session;
+        }
+        
+        if (session.Participants.TryGetValue(AuthService.User.Id, out var participant))
+            participant.Instances.Add(this);
+        else session.Participants[AuthService.User.Id] = new(this);
+        
+        await session.UpdateAll();
+    }
+
+    private void CircuitConnected()
+        => _ = Join();
+
+    private void CircuitDisconnected()
+        => _ = Leave();
+
+    public async ValueTask DisposeAsync()
+    {
+        Circuit.Connected -= CircuitConnected;
+        Circuit.Disconnected -= CircuitDisconnected;
+        await Leave();
+    }
+    
+    public async Task Leave()
+    {
+        if (SessionId != null && Sessions.TryGetValue(SessionId, out var session) && session.Participants.TryGetValue(AuthService.User.Id, out var participant))
+        {
+            participant.Instances.Remove(this);
+            if (participant.Instances.Count == 0)
+            {
+                session.Participants.Remove(AuthService.User.Id, out _);
+                if (session.Participants.Count == 0)
+                    Sessions.Remove(SessionId, out _);
+                else await session.UpdateAll();
+            }
+            else await session.UpdateAll();
+        }
+    }
+
+    private async Task Reveal()
+    {
+        var session = GetSession();
+        session.Revealed = true;
+        session.LastReveal = DateTime.UtcNow;
+        await session.UpdateAll();
+    }
+
+    private async Task Reset()
+    {
+        var session = GetSession();
+        if (DateTime.UtcNow - session.LastReveal < TimeSpan.FromSeconds(3))
+            return;
+        session.Revealed = false;
+        foreach (var participant in session.Participants.Values)
+            participant.Decision = null;
+        await session.UpdateAll(true);
+    }
+
+    private async Task Vote(double points)
+    {
+        var session = GetSession();
+        session.Participants[AuthService.User.Id].Decision = new(points, Explanation=="" ? null : Explanation);
+        await session.UpdateAll();
+    }
+
+    private Session GetSession()
+    {
+        if (SessionId != null && Sessions.TryGetValue(SessionId, out var session))
+            return session;
+        else throw new Exception("No session found!");
+    }
+
+    private string GetPointsColorStyle(double points)
+    {
+        var decision = GetSession().Participants[AuthService.User.Id].Decision;
+        return decision != null && Math.Abs(decision.Points - points) == 0
+            ? $"color: #000000 !important; background: {GreenColor} !important"
+            : "";
+    }
+
+    private string GetExplanationColorStyle()
+    {
+        var decision = GetSession().Participants[AuthService.User.Id].Decision;
+        return decision != null
+            ? (decision.Explanation != null ? Explanation == decision.Explanation : Explanation == "")
+                ? $"box-shadow: inset 0 0 0 0.125rem {GreenColor}"
+                : $"box-shadow: inset 0 0 0 0.125rem {RedColor}"
+            : "";
+    }
+}

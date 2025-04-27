@@ -1,0 +1,43 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="color-scheme" content="light dark">
+    <base href="/" />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/bootstrap/bootstrap.min.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/base.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/chat.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/icons.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/list.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/menu.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/nav.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/sidebar.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/tree.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/styles/users-tab.css") />
+    <link rel="stylesheet" href=@Global.MakeFilePath("/cocoding.styles.css") />
+    <link rel="icon" type="image/png" href=@Global.MakeFilePath("/favicon.png") />
+    <!--Boostrap JS-Bundle for collapsing information-->
+    <script src="bootstrap/bootstrap.bundle.min.js"></script>
+    <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+</head>
+
+<body>
+    <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+    
+    <script src=@Global.MakeFilePath("/js/codemirror.bundle.js")></script>
+    <script src=@Global.MakeFilePath("/js/signalr.bundle.js")></script>
+    <script src=@Global.MakeFilePath("/js/compile.bundle.js")></script>
+    <script src=@Global.MakeFilePath("/js/babel.min.js")></script>
+    <!-- COMPILER.JS NEEDS TO BE INCLUDED BEFORE EDITOR.JS -->
+    <script src=@Global.MakeFilePath("/compiler.js")></script>
+    <script src=@Global.MakeFilePath("/editor.js")></script>
+    <!-- COMPILER.JS NEEDS TO BE INCLUDED BEFORE EDITOR.JS -->
+    <script src=@Global.MakeFilePath("/miscellaneous.js")></script>
+
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,39 @@
+@page "/browse-tree"
+@inject AuthService AuthService
+@inject NavigationManager NavigationManager
+
+<!-- Wrapper page for the file tree -->
+@if (ViewedProjectData != null) {
+    <CoCoTitle>@ViewedProjectData.Name</CoCoTitle>
+    <BrowseTreeComponent ProjectData="ViewedProjectData" Class="fullscreen" />
+} else if (NotFound) {
+    <h1 class="text-danger">Nicht gefunden!</h1>
+}
+
+@code {
+    private ProjectNodeData? ViewedProjectData { get; set; }
+
+    private bool NotFound = false;
+
+    /// <summary>
+    /// Loads the project from the query parameters and validates access rights.
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        if (NavigationManager.TryGetQuery("pid", out var pidString)
+            && int.TryParse(pidString, out var projectId))
+        {
+            var project = Database.Transaction(cp => ProjectTable.GetById(cp, projectId));
+            if (project != null)
+            {
+                if (AuthService.HasRole(project.Id, ProjectRole.Participant))
+                {
+                    ViewedProjectData = new(project);
+                    return;
+                }
+            }
+        }
+
+        NotFound = true;
+    }
+}

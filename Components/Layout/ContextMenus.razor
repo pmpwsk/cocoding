@@ -1,0 +1,457 @@
+@implements IDisposable
+@inject SharedDataService SharedData
+@inject NavigationManager Navigation
+@inject AuthService Auth
+
+<!-- Context menus are always being rendered and only hidden in CSS to allow for fade-in animations. -->
+
+<!-- Options for projects -->
+<div class="menu left @State(ContextMenu.Project_Options)" @onclick="Hide">
+    <div @onclick:stopPropagation="true">
+        <h5>Projekt</h5>
+        <h6>@CachedName</h6>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.Project_CreateFolder)">Ordner erstellen</a>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.Project_CreateFile)">Datei erstellen</a>
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- Options for folders -->
+<div class="menu left @State(ContextMenu.Folder_Options)" @onclick="Hide">
+    <div @onclick:stopPropagation="true">
+        <h5>Ordner</h5>
+        <h6>@CachedName</h6>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.Folder_CreateFolder)">Ordner erstellen</a>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.Folder_CreateFile)">Datei erstellen</a>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.Folder_Rename)">Umbenennen</a>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.Folder_Delete)">Löschen</a>
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- Options for files -->
+<div class="menu left @State(ContextMenu.File_Options)" @onclick="Hide">
+    <div @onclick:stopPropagation="true">
+        <h5>Datei</h5>
+        <h6>@CachedName</h6>
+        <a href="/editor?id=@(SharedData.ContextFile != null ? SharedData.ContextFile.Id : "")"  target="_blank" @onclick="Hide">In neuem Tab öffnen</a>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.File_Rename)">Umbenennen</a>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.File_Delete)">Löschen</a>
+        <a href="javascript:" @onclick="() => Open(ContextMenu.File_Details)">Details</a>
+        @if (SharedData.ViewedFile != null) { <!--Only offer download in the editor sidebar-->
+            <a href="javascript:" onclick="downloadFileId(@(SharedData.ContextFile != null ? SharedData.ContextFile.Id : ""), '@(SharedData.ContextFile != null ? SharedData.ContextFile.Name : "")')">Download</a>
+        }
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- Create folder -->
+<div class="menu left @State(ContextMenu.Project_CreateFolder, ContextMenu.Folder_CreateFolder)" @onclick="() => Open(SharedData.ContextMenu == ContextMenu.Project_CreateFolder ? ContextMenu.Project_Options : ContextMenu.Folder_Options)">
+    <div @onclick:stopPropagation="true">
+        <h5>Ordner erstellen</h5>
+        <h6>@CachedName</h6>
+        <form @onsubmit="CreateFolder">
+            <label for="new-folder-name">Name:</label>
+            <input @ref="CreateFolderInput" type="text" id="new-folder-name" placeholder="Namen eingeben..." @bind-value="@Name"/>
+            @if (ErrorMessage != null) {
+                <p class="text-danger">@ErrorMessage</p>
+            }
+            <button type="submit">Erstellen</button>
+        </form>
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- Create file -->
+<div class="menu left @State(ContextMenu.Project_CreateFile, ContextMenu.Folder_CreateFile)" @onclick="() => Open(SharedData.ContextMenu == ContextMenu.Project_CreateFile ? ContextMenu.Project_Options : ContextMenu.Folder_Options)">
+    <div @onclick:stopPropagation="true">
+        <h5>Datei erstellen</h5>
+        <h6>@CachedName</h6>
+        <form @onsubmit="CreateFile">
+            <label for="new-file-name">Name:</label>
+            <input @ref="CreateFileInput" type="text" id="new-file-name" placeholder="Namen eingeben..." @bind-value="@Name"/>
+            @if (ErrorMessage != null) {
+                <p class="text-danger">@ErrorMessage</p>
+            }
+            <button type="submit">Erstellen</button>
+        </form>
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- Rename -->
+<div class="menu left @State(ContextMenu.Folder_Rename, ContextMenu.File_Rename)" @onclick="() => Open(SharedData.ContextMenu == ContextMenu.Folder_Rename ? ContextMenu.Folder_Options : ContextMenu.File_Options)">
+    <div @onclick:stopPropagation="true">
+        <h5>Umbenennen</h5>
+        <h6>@CachedName</h6>
+        <form @onsubmit="Rename">
+            <label for="rename-name">Name:</label>
+            <input @ref="RenameInput" type="text" id="rename-name" placeholder="Namen eingeben..." @bind-value="@Name"/>
+            @if (ErrorMessage != null) {
+                <p class="text-danger">@ErrorMessage</p>
+            }
+            <button type="submit">Umbenennen</button>
+        </form>
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- Delete folder -->
+<div class="menu left @State(ContextMenu.Folder_Delete)" @onclick="() => Open(ContextMenu.Folder_Options)">
+    <div @onclick:stopPropagation="true">
+        <h5>Löschen</h5>
+        <h6>@CachedName</h6>
+        <!-- Shows an extra warning if there are files being used in the folder and lists the active users -->
+        @if (ActiveUsers.Count > 0) {
+            <p class="text-danger">Achtung: In diesem Ordner ist gerade mindestens eine Datei in Bearbeitung im Editor! Bitte stellen Sie sicher, dass dieser Ordner tatsächlich gelöscht werden kann!</p>
+            <div>
+                <u>Aktive Nutzer:</u>
+                <ActiveUserList Users="@ActiveUsers"/>
+            </div>
+            <button class="danger" @onclick="() => ActiveUsers = []">Trotzdem löschen</button>
+        } else {
+            <p class="text-danger">Wirklich löschen? Alle Dateien gehen unwiderruflich verloren.</p>
+            <button class="danger" @onclick="Delete">Dauerhaft löschen</button>
+        }
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- Delete file -->
+<div class="menu left @State(ContextMenu.File_Delete)" @onclick="() => Open(ContextMenu.File_Options)">
+    <div @onclick:stopPropagation="true">
+        <h5>Löschen</h5>
+        <h6>@CachedName</h6>
+        <!-- Shows an extra warning if the file is being used and lists the active users -->
+        @if (ActiveUsers.Count > 0) {
+            <p class="text-danger">Achtung: Die Datei ist gerade in Bearbeitung im Editor! Bitte stellen Sie sicher, dass sie tatsächlich gelöscht werden kann!</p>
+            <div>
+                <u>Aktive Nutzer:</u>
+                <ActiveUserList Users="@ActiveUsers"/>
+            </div>
+            <button class="danger" @onclick="() => ActiveUsers = []">Trotzdem löschen</button>
+        } else {
+            <p class="text-danger">Wirklich löschen? Die Datei geht unwiderruflich verloren.</p>
+            <button class="danger" @onclick="Delete">Dauerhaft löschen</button>
+        }
+        <button @onclick="Hide">Abbrechen</button>
+    </div>
+</div>
+
+<!-- File details -->
+<div class="menu left @State(ContextMenu.File_Details)" @onclick="() => Open(ContextMenu.File_Options)">
+    <div @onclick:stopPropagation="true">
+        <h5>Details</h5>
+        <h6>@CachedName</h6>
+        @if (SharedData.ContextFile != null) {
+            <label>Zuletzt geändert:</label>
+            <p>@Auth.LocalTimeString(SharedData.ContextFile.Changed)</p>
+            <label>Letzter Nutzer:</label>
+            @if (CachedUser != null) {
+                <a href="/user?id=@CachedUser.Id" class="info">@CachedUser.DisplayName</a>
+            } else {
+                <p>Gelöschter Nutzer</p>
+            }
+        }
+        <button @onclick="Hide">Schließen</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>
+    /// Element reference to the folder creation input field, in order to automatically focus it.
+    /// </summary>
+    private ElementReference CreateFolderInput;
+    
+    /// <summary>
+    /// Element reference to the file creation input field, in order to automatically focus it.
+    /// </summary>
+    private ElementReference CreateFileInput;
+    
+    /// <summary>
+    /// Element reference to the renaming input field, in order to automatically focus it.
+    /// </summary>
+    private ElementReference RenameInput;
+
+    /// <summary>
+    /// The last known name of the last object that was selected in a context menu.<br/>
+    /// The name is cached so the heading doesn't flash away during the closing animation.
+    /// </summary>
+    private string? CachedName = null;
+
+    /// <summary>
+    /// The last known change user associated with the most recent file viewed in the details.<br/>
+    /// May be null if the associated user wasn't found.
+    /// </summary>
+    private UserEntry? CachedUser = null;
+    
+    /// <summary>
+    /// The error message for the last attempted operation or null if no error occurred.
+    /// </summary>
+    private string? ErrorMessage = null;
+    
+    /// <summary>
+    /// The value of all name input fields.
+    /// </summary>
+    private string Name = "";
+
+    /// <summary>
+    /// The list of users who are active within the object that in the process of being deleted.
+    /// </summary>
+    private List<UserEntry> ActiveUsers = [];
+    
+    /// <summary>
+    /// Subscribes to all events.
+    /// </summary>
+    protected override void OnInitialized()
+    {
+        SharedData.Changed += SharedDataChanged;
+        Navigation.LocationChanged += LocationChanged;
+    }
+
+    /// <summary>
+    /// Unsubscribes from all events.
+    /// </summary>
+    public void Dispose()
+    {
+        SharedData.Changed -= SharedDataChanged;
+        Navigation.LocationChanged -= LocationChanged;
+    }
+
+    /// <summary>
+    /// Automatically hides the context menu when the user navigates to a different page.
+    /// </summary>
+    private void LocationChanged(object? sender, LocationChangedEventArgs e)
+        => Hide();
+
+    /// <summary>
+    /// Updates the cached name and indicates that the state has changed.
+    /// </summary>
+    private void SharedDataChanged()
+    {
+        var menuString = SharedData.ContextMenu.ToString();
+        var index = menuString.IndexOf('_');
+        string? newName = index != -1 ? menuString[..index] switch
+        {
+            "Project" => SharedData.ContextProjectData?.Name,
+            "Folder" => SharedData.ContextFolderData?.Name,
+            "File" => SharedData.ContextFile?.Name,
+            _ => null
+        } : null;
+
+        if (newName != null)
+            CachedName = newName;
+        
+        InvokeAsync(StateHasChanged).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Returns "visible" if any of the given context menu options are selected, otherwise "hidden".<br/>
+    /// This is used as a CSS class to decide which context menu to display.
+    /// </summary>
+    private string State(params ContextMenu[] options)
+        => options.Contains(SharedData.ContextMenu) ? "visible" : "hidden";
+
+    /// <summary>
+    /// Opens the given context menu and takes the necessary actions beforehand (errors, name value, busy files flag, focus, updating details).
+    /// </summary>
+    private void Open(ContextMenu option)
+    {
+        ErrorMessage = null;
+        Name = option switch
+        {
+            ContextMenu.Folder_Rename => SharedData.ContextFolderData?.Folder.Name ?? "",
+            ContextMenu.File_Rename => SharedData.ContextFile?.Name ?? "",
+            _ => ""
+        };
+
+        ActiveUsers = option switch
+        {
+            ContextMenu.Folder_Delete
+                => SharedData.ContextFolderData != null ? FileManager.ListActiveUsers(SharedData.ContextFolderData.Folder) : [],
+            ContextMenu.File_Delete
+                => SharedData.ContextFile != null ? FileManager.ListActiveUsers(SharedData.ContextFile) : [],
+            _ => []
+        };
+        
+        SharedData.ContextMenu = option;
+
+        ElementReference? focus = option switch
+        {
+            ContextMenu.Project_CreateFolder
+                or ContextMenu.Folder_CreateFolder
+                => CreateFolderInput,
+            ContextMenu.Project_CreateFile
+                or ContextMenu.Folder_CreateFile
+                => CreateFileInput,
+            ContextMenu.Folder_Rename
+                or ContextMenu.File_Rename
+                => RenameInput,
+            _ => null
+        };
+        if (focus != null)
+        {
+            StateHasChanged();
+            _ = Focus();
+
+            async Task Focus()
+            {
+                await Task.Delay(50);
+                await focus.Value.FocusAsync();
+            }
+        }
+
+        if (option == ContextMenu.File_Details && SharedData.ContextFile != null)
+        {
+            Database.Transaction(cp =>
+            {
+                SharedData.ContextFile = FileTable.GetById(cp, SharedData.ContextFile.Id);
+                CachedUser = SharedData.ContextFile != null
+                    ? UserTable.GetById(cp, SharedData.ContextFile.UserId)
+                    : null;
+            });
+        }
+    }
+
+    /// <summary>
+    /// Closes the context menu.
+    /// </summary>
+    private void Hide()
+    {
+        ErrorMessage = null;
+        Name = "";
+        SharedData.HideAllMenus();
+    }
+
+    /// <summary>
+    /// Creates a folder based on the selected project/folder and name.
+    /// </summary>
+    private void CreateFolder()
+    {
+        try
+        {
+            ErrorMessage = null;
+
+            FolderEntry? folder = null;
+            switch (SharedData.ContextMenu)
+            {
+                case ContextMenu.Project_CreateFolder:
+                    if (SharedData.ContextProjectData != null)
+                        folder = FileManager.CreateFolder(SharedData.ContextProjectData.Project.Id, null, Name);
+                    break;
+                case ContextMenu.Folder_CreateFolder:
+                    if (SharedData.ContextFolderData != null)
+                        folder = FileManager.CreateFolder(SharedData.ContextFolderData.Folder.ProjectId, SharedData.ContextFolderData.Folder.Id, Name);
+                    break;
+            }
+
+            if (folder != null)
+            {
+                FileManager.Events.ReportFolderCreated(folder);
+                Hide();
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Creates a file based on the selected project/folder and name.
+    /// </summary>
+    private void CreateFile()
+    {
+        try
+        {
+            ErrorMessage = null;
+            
+            FileEntry? file = null;
+            switch (SharedData.ContextMenu)
+            {
+                case ContextMenu.Project_CreateFile:
+                    if (SharedData.ContextProjectData != null)
+                        file = FileManager.CreateFile(SharedData.ContextProjectData.Project.Id, null, Name, Auth.User.Id);
+                    break;
+                case ContextMenu.Folder_CreateFile:
+                    if (SharedData.ContextFolderData != null)
+                        file = FileManager.CreateFile(SharedData.ContextFolderData.Folder.ProjectId, SharedData.ContextFolderData.Folder.Id, Name, Auth.User.Id);
+                    break;
+            }
+
+            if (file != null)
+            {
+                FileManager.Events.ReportFileCreated(file);
+                Hide();
+                Navigation.NavigateTo($"/editor?id={file.Id}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+    
+    /// <summary>
+    /// Renames the selected folder/file using the input name.
+    /// </summary>
+    private void Rename()
+    {
+        try
+        {
+            ErrorMessage = null;
+            
+            switch (SharedData.ContextMenu)
+            {
+                case ContextMenu.Folder_Rename:
+                    if (SharedData.ContextFolderData != null
+                            && FileManager.RenameFolder(SharedData.ContextFolderData.Folder, Name))
+                    {
+                        SharedData.ContextFolderData.Folder.Name = Name;
+                        FileManager.Events.ReportFolderMetadataChanged(SharedData.ContextFolderData.Folder);
+                        Hide();
+                    }
+                    break;
+                case ContextMenu.File_Rename:
+                    if (SharedData.ContextFile != null
+                            && FileManager.RenameFile(SharedData.ContextFile, Name))
+                    {
+                        SharedData.ContextFile.Name = Name;
+                        FileManager.Events.ReportFileMetadataChanged(SharedData.ContextFile);
+                        Hide();
+                    }
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Deletes the selected folder/file.
+    /// </summary>
+    private void Delete()
+    {
+        switch (SharedData.ContextMenu)
+        {
+            case ContextMenu.Folder_Delete:
+                if (SharedData.ContextFolderData != null)
+                {
+                    ProjectManager.DeleteFolder(SharedData.ContextFolderData.Folder.Id);
+                    FileManager.Events.ReportFolderDeleted(SharedData.ContextFolderData.Folder);
+                    Hide();
+                }
+                break;
+            case ContextMenu.File_Delete:
+                if (SharedData.ContextFile != null)
+                {
+                    ProjectManager.DeleteFile(SharedData.ContextFile.Id);
+                    FileManager.Events.ReportFileDeleted(SharedData.ContextFile);
+                    Hide();
+                }
+                break;
+        }
+    }
+}
