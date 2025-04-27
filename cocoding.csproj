@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>cocoding</RootNamespace>
-    <Version>9.0.0.4</Version>
+    <Version>10.0.0.2</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +24,7 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="3.1.7" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="8.0.10" />
     <PackageReference Include="MySqlConnector" Version="2.3.7" />
+    <PackageReference Include="uwap.WebFramework" Version="3.0.1" />
   </ItemGroup>
 
   <ItemGroup>

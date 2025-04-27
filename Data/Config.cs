@@ -29,4 +29,19 @@ public class Config()
     /// Whether to show ASP.NET logs.
     /// </summary>
     public bool AspNetLogs = false;
+
+    /// <summary>
+    /// Whether to start in debug mode.
+    /// </summary>
+    public bool Debug = false;
+
+    /// <summary>
+    /// The domains to request certificates for.
+    /// </summary>
+    public string[] AutoCertificateDomains = [];
+
+    /// <summary>
+    /// The email address to request certificates with.
+    /// </summary>
+    public string? AutoCertificateEmail = null;
 }

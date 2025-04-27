@@ -2,6 +2,7 @@ using System.Reflection;
 using cocoding.Components;
 using cocoding.Data;
 using Microsoft.AspNetCore.Components.Server.Circuits;
+using uwap.WebFramework;
 
 namespace cocoding;
 
@@ -13,16 +14,6 @@ public static class Global
     public static Version Version { get; private set; } = new(0, 0, 0, 0);
     
     public static string VersionString => $"{Version.Major}.{Version.Minor}.{Version.Build}.{Version.Revision}";
-    
-    /// <summary>
-    /// The ASP.NET web application object.
-    /// </summary>
-    private static WebApplication? App = null;
-    
-    /// <summary>
-    /// Provides a HttpContext object in places where it wasn't given as a parameter.
-    /// </summary>
-    private static IHttpContextAccessor? ContextAccessor {get; set;} = null;
 
     /// <summary>
     /// The server configuration object.
@@ -33,16 +24,14 @@ public static class Global
     /// Provides the current HttpContext object.
     /// </summary>
     public static HttpContext HttpContext
-        => (ContextAccessor ?? throw new Exception("ContextAccessor is null!")).HttpContext ?? throw new Exception("HttpContext is null!");
+        => Server.CurrentHttpContext ?? throw new Exception("HttpContext is null!");
 
     /// <summary>
     /// Stops the web server, shutting down the application in the process.
     /// </summary>
     public static void Stop()
     {
-        App?.StopAsync(TimeSpan.FromSeconds(1)).GetAwaiter().GetResult();
-        Environment.Exit(0);
-        Environment.FailFast("Failed to exit softly.");
+        Server.Exit(false);
     }
 
     /// <summary>
@@ -52,80 +41,85 @@ public static class Global
     {
         LoadConfig();
         
-        // Start building the application
-        var builder = WebApplication.CreateBuilder();
+        if (Server.DebugMode = Config.Debug)
+        {
+            Console.ForegroundColor = ConsoleColor.Blue;
+            Console.WriteLine("RUNNING IN DEBUG MODE");
+            Console.ResetColor();
+        }
+        
+        Server.Config.AllowMoreMiddlewaresIfUnhandled = true;
 
-        // Services: Razor, HttpContextAccessor, AuthService, SharedDataService, CircuitService
-        builder.Services.AddRazorComponents()
-            .AddInteractiveServerComponents()
-            .AddCircuitOptions(blazorOptions => blazorOptions.DetailedErrors = builder.Environment.IsDevelopment());
-        builder.Services.AddHttpContextAccessor();
-        builder.Services.AddScoped(serviceProvider => new AuthService(serviceProvider));
-        builder.Services.AddScoped<SharedDataService>();
-        builder.Services.AddScoped<CircuitService>();
-        builder.Services.AddScoped<CircuitHandler>(serviceProvider => serviceProvider.GetRequiredService<CircuitService>());
-
-        // Add SignalR service
-        builder.Services.AddSignalR()
-            .AddMessagePackProtocol();
-
+        Server.Config.ConfigureServices = services =>
+        {
+            // Services: Razor, HttpContextAccessor, AuthService, SharedDataService, CircuitService
+            services.AddRazorComponents()
+                .AddInteractiveServerComponents()
+                .AddCircuitOptions(blazorOptions => blazorOptions.DetailedErrors = Server.DebugMode);
+            services.AddHttpContextAccessor();
+            services.AddScoped(serviceProvider => new AuthService(serviceProvider));
+            services.AddScoped<SharedDataService>();
+            services.AddScoped<CircuitService>();
+            services.AddScoped<CircuitHandler>(serviceProvider => serviceProvider.GetRequiredService<CircuitService>());
+            
+            // Add SignalR service
+            services.AddSignalR()
+                .AddMessagePackProtocol();
+        };
+        
         // Configure kestrel ports
-        builder.WebHost.ConfigureKestrel(kestrelOptions =>
+        if (Config.HTTP != default)
+            Server.Config.HttpPort = Config.HTTP;
+        if (Config.HTTPS != default && Config.Certificate != null)
         {
-            if (Config.HTTP != default)
-                kestrelOptions.ListenAnyIP(Config.HTTP);
-            if (Config.HTTPS != default && Config.Certificate != null)
-                kestrelOptions.ListenAnyIP(Config.HTTPS, listenOptions => listenOptions.UseHttps(Config.Certificate));
-        });
-
-        // Development settings (detailed errors) // Production settings part 1 (disable ASP.NET logs)
-        if (builder.Environment.IsDevelopment())
-            builder.WebHost.UseSetting(WebHostDefaults.DetailedErrorsKey, "true");
-        
-        // Disable ASP.NET logs if configured
-        if (!Config.AspNetLogs)
-            builder.Services.AddLogging(logging => logging.ClearProviders());
-        
-        //add lifetime service
-        builder.Services.AddHostedService<LifetimeService>();
-
-        // Finish building the application
-        App = builder.Build();
-
-        // Save HttpContextAccessor
-        ContextAccessor = App.Services.GetRequiredService<IHttpContextAccessor>();
-
-        // Production settings part 2 (exception handler)
-        if (!App.Environment.IsDevelopment())
-            App.UseExceptionHandler("/Error", createScopeForErrors: true);
-
-        // HSTS and HTTPS redirection
-        if (Config.HTTPS != default)
-        {
-            App.UseHsts();
-            App.UseHttpsRedirection();
+            Server.Config.HttpsPort = Config.HTTPS;
+            Server.LoadCertificate("any", Config.Certificate);
         }
 
-        // Add security middleware
-        App.UseStaticFiles();
-        App.UseAntiforgery();
+        // Disable ASP.NET logs if configured
+        Server.Config.Log.AspNet = Config.AspNetLogs;
+        
+        // Set lifetime event
+        Server.ProgramStopping += () =>
+        {
+            foreach (var fileGroup in EditorHub.FileGroups.Values)
+                fileGroup.Persist();
+        };
 
-        // Add Razor middleware
-        App.MapRazorComponents<App>()
-            .AddInteractiveServerRenderMode();
+        Server.Config.ConfigureWebApp = app =>
+        {
+            // Production settings part 2 (exception handler)
+            if (!Server.DebugMode)
+                app.UseExceptionHandler("/Error", createScopeForErrors: true);
 
-        // Map SignalR hub for the editor
-        App.MapHub<EditorHub>("/editor-hub");
+            // Add security middleware
+            app.UseStaticFiles();
+            app.UseAntiforgery();
+
+            // Add Razor middleware
+            app.MapRazorComponents<App>()
+                .AddInteractiveServerRenderMode();
+
+            // Map SignalR hub for the editor
+            app.MapHub<EditorHub>("/editor-hub");
+        };
 
         // Test database connection
         Database.TestConnection();
 
-        // Start worker
-        Worker.Start();
+        // Set worker
+        Server.Config.WorkerInterval = 240;
+        Server.WorkerWorked += Worker.Work;
+        
+        // Certificate requesting
+        if (Config.AutoCertificateEmail != null)
+        {
+            Server.Config.AutoCertificate.Email = Config.AutoCertificateEmail;
+            Server.Config.AutoCertificate.Domains.AddRange(Config.AutoCertificateDomains);
+        }
 
-        // Start application
-        Console.WriteLine("Starting...");
-        App.Run();
+        // Start server
+        Server.Start();
     }
 
     /// <summary>
@@ -182,8 +176,20 @@ public static class Global
                             {
                                 if (bool.TryParse(value, out bool valueBool))
                                     config.AspNetLogs = valueBool;
-                                else Console.WriteLine($"Invalid value \"{value}\" for configuration key \"HTTPS\", ignoring...");
+                                else Console.WriteLine($"Invalid value \"{value}\" for configuration key \"AsNetLogs\", ignoring...");
                             } break;
+                            case "Debug":
+                            {
+                                if (bool.TryParse(value, out bool valueBool))
+                                    config.Debug = valueBool;
+                                else Console.WriteLine($"Invalid value \"{value}\" for configuration key \"Debug\", ignoring...");
+                            } break;
+                            case "AutoCertificateDomains":
+                                config.AutoCertificateDomains = value.Split(',');
+                                break;
+                            case "AutoCertificateEmail":
+                                config.AutoCertificateEmail = value;
+                                break;
                             default:
                                 Console.WriteLine($"Invalid configuration key \"{key}\", ignoring...");
                                 break;
@@ -196,6 +202,8 @@ public static class Global
                         Console.WriteLine("HTTP and HTTPS can't both use the same port, ignoring configuration...");
                     else if (config.HTTPS != default && config.Certificate == null)
                         Console.WriteLine("HTTPS can't be enabled without a certificate, ignoring configuration...");
+                    else if (Config.AutoCertificateDomains.Length > 0 && Config.AutoCertificateEmail == null)
+                        Console.WriteLine("AutoCertificate can't be enabled without an email address, ignoring configuration...");
                     else
                     {
                         Config = config;
@@ -215,8 +223,7 @@ public static class Global
     /// Returns the given path while appending a query string like "?v=[VERSION]" in production mode or "?t=[TIMESTAMP]" in development mode.
     /// </summary>
     public static string MakeFilePath(string path)
-        => App != null && App.Environment.IsDevelopment()
-                       && path.StartsWith('/') && File.Exists($"wwwroot/{path}")
+        => Server.DebugMode && path.StartsWith('/') && File.Exists($"wwwroot/{path}")
             ? $"{path}?t={File.GetLastWriteTimeUtc($"wwwroot/{path}").Ticks}"
             : $"{path}?v={VersionString}";
 
@@ -228,26 +235,5 @@ public static class Global
         var version = assembly.GetName().Version;
         if (version != null)
             Version = version;
-    }
-
-    private class LifetimeService(IHostApplicationLifetime hal) : IHostedService
-    {
-        private readonly IHostApplicationLifetime HostApplicationLifetime = hal;
-
-        public Task StartAsync(CancellationToken cancellationToken)
-        {
-            HostApplicationLifetime.ApplicationStopping.Register(ApplicationStopping);
-            return Task.CompletedTask;
-        }
-
-        public Task StopAsync(CancellationToken cancellationToken)
-            => Task.CompletedTask;
-
-        private static void ApplicationStopping()
-        {
-            Console.WriteLine("Stopping...");
-            foreach (var fileGroup in EditorHub.FileGroups.Values)
-                fileGroup.Persist();
-        }
     }
 }
